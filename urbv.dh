@@ -1,0 +1,257 @@
+
+include "std/io"
+include "std/gx"
+include "std/rand"
+include "std/math"
+include "std/time"
+
+
+W := 800
+H := 800
+
+
+rand.seed(time.stamp())
+
+
+gx.size(W,H);
+gx.background(0.1,0.2,0.3);
+
+
+cw : f32;
+ch : f32;
+
+
+wx : f32;
+wy : f32;
+ww : f32;
+wh : f32;
+nw : i32;
+dw : i32;
+br : i32;
+pp : i32;
+
+
+cc : vec[f32,3];
+
+
+func draw_cell(){
+  gx.no_stroke();
+  bc := cc+rand.random({0.05,0.05,0.05});
+  gx.fill(...bc);
+  gx.rect(0,0,cw,ch);
+  if (br){
+    gx.stroke(...(cc-{0.1,0.1,0.1}));
+    gx.stroke_weight(1);
+    for (i := 0; i < 10; i++){
+      gx.line(0,i*ch/10,cw,i*ch/10);
+    }
+    for (i := 0; i < 20; i++){
+      gx.line(i*cw/20,0,i*cw/20,ch);
+    }
+  }
+
+
+
+  gx.stroke(rand.random(0.7,1.0));
+  gx.stroke_weight(5);
+  gx.rect(wx,wy,ww,wh);
+  gx.no_stroke();
+
+
+  for (i := 0; i < nw; i++){
+    bc := rand.random(0.5,0.6);
+    if (rand.random()<0.2){
+      bc *= 0.6;
+    }
+    gx.fill(...(bc+rand.random({0.1,0.1,0.1})));
+    
+    gx.rect(wx+i*(ww/nw),wy,ww/nw,wh);
+  }
+
+
+  np : i32 = rand.random(-12,4);
+  for (k := 0; k < np; k++){
+    gx.no_stroke();
+    px := wx+rand.random(10,ww-10)
+    py := wy+wh-12;
+    pc := rand.random({0.1,0.3,0.0},{0.2,0.4,0.1})
+    fr := rand.random()*2-1.0;
+    fc : vec[f32,3];
+
+
+    fc = rand.random({0.7,0.2,0.2},{0.9,0.7,0.5})
+    
+    for (i := 0; i < 10; i++){
+      gx.fill(...(pc+rand.random({0.1,0.1,0.1})));
+      gx.push_matrix();
+      gx.translate(px+rand.random(-6,6),py+rand.random(-5,8));
+      gx.rotate_deg(rand.random(360))
+      gx.rect(-3,-3,6,6);
+      gx.pop_matrix();
+      if (i == 7){
+        gx.fill(...rand.random({0.2,0.1,0.1},{0.5,0.2,0.2}));
+        pw := rand.random(10,20);
+        gx.rect(px-pw/2,py+5,pw,6);
+      }
+      if (rand.random()<fr){
+        gx.fill(...(fc+rand.random({0.1,0.1,0.1})))
+        gx.circle(px+rand.random(-6,6),py+rand.random(-6,6),3);
+      }
+    }
+  }
+  gx.stroke_weight(3);
+  gx.no_fill();
+  for (i := 0; i < nw; i++){
+    gx.stroke(rand.random(0.8,1.0));
+    gx.rect(wx+i*(ww/nw),wy,ww/nw,wh);
+  }
+  if (dw){
+    gx.line(wx,wy+wh*0.4,wx+ww,wy+wh*0.4);
+  }
+  if (pp && ww < cw*0.7){
+    ppx := math.lerp(wx+ww,cw,0.6)
+    gx.stroke(0.6,0.55,0.5);
+    gx.stroke_weight(5);
+    gx.line(ppx,0,ppx,ch);
+    gx.stroke(0.9);
+    gx.stroke_weight(2.5);
+    gx.line(ppx-0.25,0,ppx-0.25,ch-1);
+  }
+  if (rand.random() < 0.4){
+    wcx := wx - 5;
+    wcw := ww + 10;
+    wcy := wy - 5;
+    wch := wh + 10;
+    gx.no_fill();
+    gx.stroke_weight(2);
+    gx.stroke(rand.random(0.3,0.6));
+    gx.rect(wcx,wcy,wcw,wch);
+    for (i := 0; i < wcw; i += 10){
+      gx.line(wcx+i,wcy,wcx+i,wcy+wch);
+    }
+    gx.line(wcx,wcy+wch-5,wcx+wcw,wcy+wch-5);
+    if (rand.random()<0.5){
+      pct := rand.random(0.2,0.8);
+      gx.line(wcx,wcy+wch*pct,wcx+wcw,wcy+wch*pct);
+    }
+    if (rand.random()<0.5){
+      gx.line(wcx,wcy+5,wcx+wcw,wcy+5);
+    }else{
+      gx.fill(rand.random(0.2,0.5));
+      gx.no_stroke();
+      gx.rect(wcx-2,wcy-2,wcw+4,8);
+    }
+
+
+  }
+  lsp := ch-(wy+wh);
+  if (rand.random()<0.65 && lsp > 40){
+    acx := rand.random(0,cw-40);
+    acy := ch-lsp+5
+    gx.no_stroke();
+    gx.fill(0.6);
+    gx.rect(acx,acy,40,35);
+    gx.fill(rand.random(0.85,0.95));
+    gx.rect(acx,acy,40,25);
+    if (rand.random()<0.3){
+      gx.fill(0.5);
+      gx.rect(acx+2,acy+2,22,22)
+    }
+    if (rand.random()<0.4){
+      gx.fill(...rand.random({0.1,0.1,0.1},{0.9,0.9,0.9}));
+      gx.rect(acx+28,acy+3,7,5);
+    }
+    gx.fill(0.3);
+    gx.circle(acx+13,acy+12,20);
+    gx.stroke(0.2,0.1,0.0);
+    gx.no_fill();
+    gx.stroke_weight(3);
+    gx.begin_shape();
+    gx.vertex(acx+4,acy+40);
+    gx.vertex(acx+4,acy+30);
+    gx.vertex(acx+36,acy+30);
+    gx.vertex(acx+36,acy+40);
+    gx.end_shape();
+    
+  }
+  if (rand.random() < 0.5){
+    gx.stroke(0.3,0.2,0.1);
+    gx.no_fill();
+    gx.stroke_weight(3);
+    gx.begin_shape();
+    gx.vertex(wx,wy+wh+5);
+    gx.vertex(wx,wy+wh-10);
+    gx.vertex(wx+ww,wy+wh-10);
+    gx.vertex(wx+ww,wy+wh+5);
+    gx.end_shape();
+    n := math.floor(rand.random(7));
+    for (i := 1; i < n; i++){
+      gx.stroke(0.4,0.3,0.2);
+      x0 := wx+i/n*ww+rand.random(-5,5)
+      x1 := wx+i/n*ww+rand.random(-5,5)
+      gx.line(x0,wy+wh-15,x1,wy+wh+5);
+      gx.no_stroke();
+
+
+      m : = math.floor(rand.random(1,4));
+      for (j := 0; j < m; j++){
+        if (rand.random()<0.5){
+          gx.fill(...rand.random({0.8,0.8,0.8},{1.0,1.0,1.0}));
+        }else{
+          gx.fill(...rand.random({0.2,0.2,0.2},{0.8,0.8,0.8}));
+        }
+        x := math.lerp(x1,x0,j/m);
+        y := wy+wh+5-10*j/m;
+        gx.begin_shape();
+        gx.vertex(x-5,y-rand.random(0,10));
+        gx.vertex(x+5,y-rand.random(0,10));
+        gx.vertex(x+5,y+rand.random(10,30));
+        gx.vertex(x,y+rand.random(10,30));
+        gx.vertex(x-5,y+rand.random(10,30));
+        gx.end_shape();
+      }
+    }
+  }
+
+
+}
+
+
+x := 0;
+y := 0;
+while (x < W){
+  y = 0;
+  cw = rand.random(80,120);
+  ch = rand.random(98,102);
+  wx = rand.random(cw*0.1,cw*0.2);
+  ww = cw-wx*2;
+  wy = rand.random(ch*0.1,ch*0.3);
+  wh = rand.random(ch*0.5,ch*0.7)-wy;
+
+
+  nw = rand.random(2,5)
+  dw = rand.random()<0.8
+
+
+  cc = rand.random({0.8,0.7,0.6},{0.9,0.8,0.7})
+  br = rand.random()<0.7
+  pp = rand.random()<0.5
+
+
+  while (y < H){
+    gx.push_matrix();
+    gx.translate(x,y);
+    draw_cell();
+    gx.pop_matrix();
+    y += ch;
+  }
+  x += cw;
+}
+
+
+
+while (1){
+  gx.poll();
+}
+
+

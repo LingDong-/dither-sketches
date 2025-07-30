@@ -1,0 +1,407 @@
+include "std/rand"
+include "std/math"
+include "std/gx"
+include "std/io"
+include "std/time"
+include "std/arr"
+include "std/list"
+
+W := 1060;
+H := 820;
+marg_x := 50;
+marg_yt := 40;
+marg_yb := 60;
+
+typedef Piece = {
+  right: union[void,Piece] = 0 as void;
+  up   : union[void,Piece] = 0 as void;
+  down : union[void,Piece] = 0 as void;
+  left : union[void,Piece] = 0 as void;
+  w : i32;
+  h : i32;
+  l : i32;
+  typ : i32;
+  row : i32;
+  col : i32;
+  func init(typ : i32){
+    .typ = typ;
+    .l = rand.random();
+    if (typ == 0){
+      .w = 50;
+      .h = 20;
+    }else if (typ == 1){
+      .w = 15;
+      .h = 120;
+      if (rand.random() < 0.5){
+        .l = 1;
+      }else{
+        .l = rand.random();
+      }
+    }else if (typ == 2){
+      .w = 50;
+      .h = 30;
+    }else if (typ == 3){
+      .w = 60;
+      .h = 30;
+    }else if (typ == 4){
+      .w = 50;
+      .h = 120;
+    }
+  }
+  func locate():vec[i32,2]{
+    if (.left is void && .down is void){
+      return {0,0}
+    }else if (.left is Piece){
+      return {
+        (.left as Piece).locate().x + (.left as Piece).w,
+        (.left as Piece).locate().y
+      }
+    }else{
+      return {
+        (.down as Piece).locate().x,
+        (.down as Piece).locate().y - (.down as Piece).h
+      }
+    }
+  }
+  func gr(n:i32){
+    if (.col < rand.random(20.0)){
+      .right = Piece{};
+      (.right as Piece).init(n);
+      (.right as Piece).left = this;
+      (.right as Piece).col = .col + 1;
+      (.right as Piece).row = .row;
+      (.right as Piece).grow();
+    }
+  }
+  func gu(n:i32){
+    if (.row < rand.random(4.0)){
+      .up = Piece{};
+      (.up as Piece).init(n);
+      (.up as Piece).down = this;
+      (.up as Piece).col = .col;
+      (.up as Piece).row = .row + 1;
+      (.up as Piece).grow();
+    }
+  }
+  func grow(){
+    if (.typ == 0){
+      .gr(0);
+      if (rand.random()>0.5){
+        .gu(1);
+      }else{
+        .gu(4);
+      }
+    }else if (.typ == 1){
+      if (.l == 1){
+        if (rand.random() > 0.1){
+          .gu(2);
+        }else{
+          .gu(3);
+        }
+      }
+    }else if (.typ == 2){
+      if (rand.random() > 0.2){
+        .gu(1);
+      }else{
+        .gu(4);
+      }
+    }
+  }
+  func draw_gradient(x:i32,y:i32,w:i32,h:i32,c1:vec[f32,3],c2:vec[f32,3]){
+    gx.no_stroke();
+    for (i := x; i <= x+w; i++){
+      inter := ((i-x) as f32)/w;
+      c := math.lerp(c1,c2,inter);
+      gx.fill(...c);
+      gx.rect(i,y,1,h);
+    } 
+  }
+  func draw(){
+    loc := .locate();
+    if (.typ == 0){
+      gx.fill(0.78,0.82);
+      gx.stroke(0);
+      gx.rect(loc.x-5,loc.y-.h,.w+10,.h);
+    }else if (.typ == 1){
+      mseg := 5;
+      seg := math.ceil(.l*mseg);
+      gx.push_matrix();
+      gx.translate(10,0);
+      for (i := 0; i < seg; i++){
+        gx.no_stroke();
+        gx.fill(0.86);
+        gx.rect(loc.x,loc.y-(i+1)*.h/mseg,.w,.h/mseg);
+        .draw_gradient(loc.x,loc.y-(i+1)*.h/mseg,.w,.h/mseg-1,{0.78,0.78,0.78},{0.98,0.98,0.98});
+        gx.stroke(0);
+        gx.no_fill();
+      }
+      gx.fill(0.08);
+      gx.rect(loc.x-4,loc.y-5,.w+8,5);
+      gx.rect(loc.x-2,loc.y-10,.w+4,5);
+      if (seg == mseg){
+        gx.rect(loc.x-5,loc.y-.h,.w+10,2);
+        gx.rect(loc.x-1,loc.y-.h+12,.w+2,2);
+        gx.begin_shape();
+        gx.vertex(loc.x-2,loc.y-.h+2);
+        gx.vertex(loc.x+.w+2,loc.y-.h+2);
+        gx.vertex(loc.x+.w,loc.y-.h+12);
+        gx.vertex(loc.x,loc.y-.h+12);
+        gx.end_shape(1);
+      }
+      gx.pop_matrix();
+    }else if (.typ == 2){
+      gx.fill(0.78,0.82);
+      gx.stroke(1);
+      gx.rect(loc.x-4,loc.y-.h,.w+8,.h);
+      gx.fill(0);
+      gx.rect(loc.x-5,loc.y-.h+10,.w+10,5);
+    }else if (.typ == 3){
+      gx.push_matrix();
+      gx.translate(10,0);
+      gx.fill(0.08);
+      gx.stroke(50);
+      gx.stroke_weight(4);
+      gx.begin_shape();
+      for (i:=0; i<11; i++){
+        gx.vertex(loc.x+(.w/2)+(.w/2)*math.cos(i*math.PI/10),
+                  loc.y-(.w/2)*math.sin(i*math.PI/10));
+      }
+      for (i:=0; i<11; i++){
+        gx.vertex(loc.x+(.w/2)-(.w/3)*math.cos(i*math.PI/10),
+                  loc.y-(.w/3)*math.sin(i*math.PI/10));
+      }
+      gx.end_shape(1);
+      gx.stroke_weight(1);
+      gx.pop_matrix();
+    }else if (.typ == 4){
+      gx.fill(0.12);
+      for (i:=0; i<.w; i++){
+        nz := rand.noise(0.005*(loc.x+i),loc.y);
+        gx.no_stroke();
+        gx.fill(0.08,0.47);
+        gx.rect(loc.x+i,loc.y-.h*nz,2,.h*nz);
+        gx.fill(0);
+        gx.rect(loc.x+i,loc.y-.h*nz-2,2,2);
+      }
+    }
+    if (.right is Piece){
+      (.right as Piece).draw();
+    }
+    if (.up is Piece){
+      (.up as Piece).draw();
+    }
+  }
+}
+
+func tree(x:f32,y:f32,a:f32,o:f32,l:f32,depth:i32){
+  if (!depth) return;
+
+  x1 := x + l * math.cos(a-o);
+  y1 := y + l * math.sin(a-o);
+  x2 := x + l * math.cos(a+o);
+  y2 := y + l * math.sin(a+o);
+  gx.stroke_weight(1);
+  gx.stroke(rand.random());
+  gx.line(x,y,x1,y1);
+  gx.line(x,y,x2,y2);
+  tree(x1,y1,a-o,o,l*0.6,depth-1);
+  tree(x2,y2,a+o,o,l*0.6,depth-1);
+}
+
+func tree2(x:f32,y:f32,l:f32,depth:i32){
+  if (!depth) return;
+
+  x1 := x;
+  y1 := y - l;
+  gx.stroke_weight(1);
+  gx.stroke(0);
+  tree(x1,y1,-math.PI,math.PI/16,l,2);
+  tree(x1,y1,0,math.PI/16,l,2);
+  gx.line(x,y,x1,y1);
+  tree2(x1,y1,l*0.8,depth-1);
+}
+
+func scan_image(pg:gx.Graphics):arr[i32,2]{
+  vm := arr.make({H-marg_yt-marg_yb,W-marg_x*2},0);
+  pix := pg.read_pixels();
+  for (i:=marg_yt; i<H-marg_yb; i++){
+    for (j:=marg_x; j<W-marg_x; j++){
+      vm[i-marg_yt,j-marg_x] = math.floor(math.linmap[f32](pix[i,j,0],0,255,1,20))*2;
+    }
+  }
+  return vm;
+}
+
+func generate_terrain(vmw:i32,vmh:i32){
+  for (i:=450; i<vmh*2; i+=50){
+    // io.println("%{i-450}/%{vmh*2-450}");
+    for (j:=0; j<vmw; j++){
+      nz0 := rand.noise(0.005*i,0.001*j);
+      nz1 := rand.noise(0.1*i,0.005*j);
+      nz2 := rand.noise(0.1*i,0.05*j,200);
+      h : f32;
+      if (i < vmh*0.9){
+        h = nz0*500 + nz1*200 + nz2*20;
+      }else if (i < vmh*0.95){
+        h = 0;
+      }else{
+        h = 200 + nz0*200 + nz1*40 + nz2*4;
+      }
+    
+      for (k:=0; k<h; k++){
+        nz3 := rand.noise(0.1*i, 0.1*j, 0.1*k);
+        if (k>2.0*h*rand.noise(0.005*i, 0.001*(j+1000))){
+          if (i < vmh*0.9){
+            gx.fill(math.clamp(math.linmap[f32](k,h/2,h,0,1.18)*(0.9+0.1*((1-k/h)+(k/h)*nz3))*i/vmh,0,1));
+          }else{
+            gx.fill(math.clamp(math.linmap[f32](k,h/2,h,0,0.98)*(0.8+0.2*((1-k/h)+(k/h)*nz3))*i/vmh,0,1));
+          }
+        }else{
+          if (i < vmh * 0.9){
+            gx.fill(math.clamp(math.linmap[f32](k,h/2,h,0,0.31)*(0.1+0.9*((1-k/h)+(k/h)*nz3))*i/vmh,0,1));
+          }else{
+            gx.fill(math.clamp(math.linmap[f32](k,h/2,h,0,0.47)*(0.1+0.9*((1-k/h)+(k/h)*nz3))*i/vmh,0,1));
+          }
+        }
+        gx.no_stroke();
+        gx.rect(j,i-k,1,1);
+        if (rand.random()>0.99 && k < h*0.7 && k > h*0.5 && i < vmh * 0.8){
+          tree2(j,i-k,5+rand.random(5.0),5);
+        }
+      }
+      gx.fill(0.78);
+      if (rand.random()>0.5){
+        gx.rect(j,i-h,1,1);
+      }
+    }
+    for (j := 0; j < vmw; j++){
+      h := 400;
+      if (rand.random()>0.9995 && i > vmh & i < vmh*1.2){
+        p := Piece{};
+        p.init(0);
+        p.grow();
+        gx.push_matrix();
+        gx.translate(j+0.5,i-h*rand.random(0.7,0.9));
+        gx.scale(3.0*(i-vmh*0.9)/(vmh*1.1));
+        p.draw();
+        gx.pop_matrix();
+      }
+    }
+  }
+}
+
+func get_edge_points(vm:arr[i32,2]):list[vec[i32,2]]{
+  epts := list[vec[i32,2]]{};
+  ({vmh,vmw}) := vm.shape();
+  for (i:=0; i<vmh; i++){
+    for (j:=0; j<vmw; j++){
+      if (j==0 || vm[i,j-1] != vm[i,j]){
+        epts.push({j,i});
+      }
+    }
+  }
+  return epts;
+}
+
+func shade(vm:arr[i32,2],epts:list[vec[i32,2]],lines:list[list[vec[i32,2]]]){
+  ({vmh,vmw}) := vm.shape();
+
+  for (i:=1; i<epts.length(); i++){
+    if (epts[i].y % vm[epts[i].y,epts[i].x] == 0){
+      for (j:=0; j<W; j++){
+        if (epts[i].x+j == vmw-1 || vm[epts[i].y,epts[i].x+j] != vm[epts[i].y,epts[i].x] ){
+          lines.push(list[vec[i32,2]]{epts[i],epts[i]+{j,0}})
+          break;
+        }
+      }
+    }
+  }
+}
+
+func connect_edge_points(epts:list[vec[i32,2]],lines:list[list[vec[i32,2]]]){
+  stops := list[list[list[vec[i32,2]]]]{};
+  ls := list[list[vec[i32,2]]]{};
+  for (i := 0; i < H; i++){
+    stops.push(list[list[vec[i32,2]]]{});
+  }
+  for (i := 0; i < epts.length(); i++){
+    stops[epts[i].y].push(list[vec[i32,2]]{vec[i32,2]{epts[i].x+1,epts[i].y}});
+  }
+  for (i := 1; i < stops.length(); i++){
+    for (j := 0; j < stops[i].length(); j++){
+      for (k := 0; k<stops[i-1].length(); k++){
+        n := stops[i-1][k].length();
+        if ( math.abs(stops[i][j][0].x - stops[i-1][k][n-1].x) < 3){
+          stops[i-1][k].push(stops[i][j][0]);
+          stops[i][j] = stops[i-1][k];
+          stops[i-1].erase(k,k+1);
+          break;
+        }
+      }
+    }
+  }
+  for (i := 0; i < stops.length(); i++){
+    for (j := 0; j < stops[i].length(); j++){
+      if (stops[i][j].length() == 1){
+        stops[i][j].push(stops[i][j][0]+{0,1});
+      }
+      lines.push(stops[i][j]);
+    }
+  }
+}
+
+seed : u32 = 1750385642 //time.stamp();
+rand.seed(seed);
+// io.println(seed);
+
+
+gx.size(W,H);
+
+
+pg:=gx.create_graphics(W,H);
+pg.begin();
+gx.push_matrix();
+gx.background(0);
+gx.translate(marg_x,marg_yt);
+generate_terrain(W-marg_x*2,H-marg_yb-marg_yt);
+gx.pop_matrix();
+pg.end();
+
+vmap := scan_image(pg);
+epts := get_edge_points(vmap);
+
+lines := list[list[vec[i32,2]]]{};
+shade(vmap,epts,lines);
+connect_edge_points(epts,lines);
+
+io.println('<svg xmlns="http://www.w3.org/2000/svg" width="%{W}" height="%{H}">');
+for (i:=0; i < lines.length(); i++){
+  io.print('<path stroke="black" stroke-width="1" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M ');
+  for (j := 0; j < lines[i].length(); j++){
+    if (j) io.print(",");
+    io.print("%{lines[i][j].x+marg_x},%{lines[i][j].y+marg_yt} ");
+  }
+  io.println('"/>');
+}
+io.println("</svg>");
+
+
+while (1){
+  // pg.draw(0,0);
+
+  gx.background(1);
+  gx.push_matrix();
+  gx.stroke(0);
+  gx.translate(marg_x+0.5,marg_yt+0.5);
+
+  gx.no_fill();
+  for (i := 0; i < lines.length(); i++){
+    gx.begin_shape();
+    for (j := 0; j < lines[i].length(); j++){
+      gx.vertex(...lines[i][j]);
+    }
+    gx.end_shape(0);
+  }
+  gx.pop_matrix();
+  gx.poll();
+}
