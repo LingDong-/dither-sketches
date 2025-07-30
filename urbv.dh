@@ -72,7 +72,7 @@ func draw_cell(){
   np : i32 = rand.random(-12,4);
   for (k := 0; k < np; k++){
     gx.no_stroke();
-    px := wx+rand.random(10,ww-10)
+    px := wx+rand.random(10.,ww-10)
     py := wy+wh-12;
     pc := rand.random({0.1,0.3,0.0},{0.2,0.4,0.1})
     fr := rand.random()*2-1.0;
@@ -85,7 +85,7 @@ func draw_cell(){
       gx.fill(...(pc+rand.random({0.1,0.1,0.1})));
       gx.push_matrix();
       gx.translate(px+rand.random(-6,6),py+rand.random(-5,8));
-      gx.rotate_deg(rand.random(360))
+      gx.rotate_deg(rand.random(360.))
       gx.rect(-3,-3,6,6);
       gx.pop_matrix();
       if (i == 7){
@@ -146,7 +146,7 @@ func draw_cell(){
   }
   lsp := ch-(wy+wh);
   if (rand.random()<0.65 && lsp > 40){
-    acx := rand.random(0,cw-40);
+    acx := rand.random(0.,cw-40);
     acy := ch-lsp+5
     gx.no_stroke();
     gx.fill(0.6);
@@ -184,7 +184,7 @@ func draw_cell(){
     gx.vertex(wx+ww,wy+wh-10);
     gx.vertex(wx+ww,wy+wh+5);
     gx.end_shape();
-    n := math.floor(rand.random(7));
+    n := math.floor(rand.random(7.));
     for (i := 1; i < n; i++){
       gx.stroke(0.4,0.3,0.2);
       x0 := wx+i/n*ww+rand.random(-5,5)
