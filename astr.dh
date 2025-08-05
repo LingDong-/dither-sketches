@@ -1,0 +1,359 @@
+include "std/g3d"
+include "std/list"
+include "std/win"
+include "std/rand"
+include "std/frag"
+include "std/math"
+include "std/io"
+include "std/vec"
+include "std/arr"
+include "std/time"
+
+W := 640
+H := 480
+grdsz := 10;
+context := win.init(W,H,win.CONTEXT_3D)
+g3d.init(context);
+frag.init(context);
+
+ord_dith_map := arr[i32,1]{
+   0,48,12,60, 3,51,15,63,
+  32,16,44,28,35,19,47,31,
+   8,56, 4,52,11,59, 7,55,
+  40,24,36,20,43,27,39,23,
+   2,50,14,62, 1,49,13,61,
+  34,18,46,30,33,17,45,29,
+  10,58, 6,54, 9,57, 5,53,
+  42,26,38,22,41,25,37,21,
+};
+lambert_material := frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @uniform view:vec[f32,4,4],
+  @varying position:vec[f32,3],
+):vec[f32,4]{
+  c := frag_coord.xy;
+  x : i32 = (c.x as i32)/2;
+  y : i32 = (c.y as i32)/2;
+  viewpos:vec[f32,4] = view @* {position.x,position.y,position.z,1.0};
+  z := 1.0+(viewpos.z)*0.05;
+  ndl := math.max(0.0,({1.,2,3}).dir().dot(normal))*0.8+0.2;
+  o := ndl*z;
+  d := (ord_dith_map[(y%8)*8+x%8] as f32)/64.0;
+  if (o < d){
+    return {0,0,0,1.0};
+  }else{
+    return {1,1,1,1.0};
+  }
+  
+}) as "fragment")
+
+PHI := 1.618034 
+icoverts := list[vec[f32,3]]{
+  {-1,  PHI, 0}, { 1,  PHI, 0}, {-1, -PHI, 0}, { 1, -PHI, 0},
+  {0, -1,  PHI}, {0,  1,  PHI}, {0, -1, -PHI}, {0,  1, -PHI},
+  { PHI, 0, -1}, { PHI, 0,  1}, {-PHI, 0, -1}, {-PHI, 0,  1}
+};
+icofaces := list[i32]{
+  0,5,11,  0, 1, 5,  0, 7, 1,  0,10,7,  0,11,10,
+  1,9, 5,  5, 4,11, 11, 2,10, 10, 6,7,  7, 8, 1,
+  3,4, 9,  3, 2, 4,  3, 6, 2,  3, 8,6,  3, 9, 8,
+  4,5, 9,  2,11, 4,  6,10, 2,  8, 7,6,  9, 1, 8
+}
+func generate_icosphere(){
+  mid_pts := dict[vec[i32,2],i32]{}
+  func add_mid_pt(ii:vec[i32,2]):i32{
+    if (ii.x > ii.y){
+      ii = ii.yx;
+    }
+    if (mid_pts[ii]){
+      return mid_pts[ii]-1;
+    }
+    icoverts.push((icoverts[ii.x]+icoverts[ii.y])*0.5);
+    mid_pts[ii] = icoverts.length();
+    return mid_pts[ii]-1;
+  }
+  for (iter:=0;iter<1;iter++){
+    n := icofaces.length();
+    for (i:=0; i<n;i+=3){
+      a := icofaces[i];
+      b := icofaces[i+1];
+      c := icofaces[i+2];
+      d := add_mid_pt({a,b});
+      e := add_mid_pt({b,c});
+      f := add_mid_pt({c,a});
+      icofaces.push(b); icofaces.push(e); icofaces.push(d);
+      icofaces.push(c); icofaces.push(f); icofaces.push(e);
+      icofaces.push(d); icofaces.push(e); icofaces.push(f);
+      icofaces[i+1] = d;
+      icofaces[i+2] = f;
+    }
+  }
+}
+generate_icosphere();
+
+typedef Rock = {
+  mesh := g3d.Mesh{};
+  tran := g3d.mat.id;
+  axis := g3d.AXIS_X
+  area := {0,0,0};
+  size := 1.;
+  func generate_mesh(){
+    verts := list[vec[f32,3]]{};
+    sd := math.random();
+    for (i := 0; i < icoverts.length(); i++){
+      verts.push(icoverts[i].dir());
+      ofs := verts[i]*1.5+1.0+sd;
+      verts[i] *= (0.2+0.8*rand.noise(...ofs));
+    }
+    for (i := 0; i < icofaces.length(); i+=3) {
+      p0 := verts[icofaces[i]];
+      p1 := verts[icofaces[i+1]];
+      p2 := verts[icofaces[i+2]];
+      .mesh.vertices.push(p0);
+      .mesh.vertices.push(p1);
+      .mesh.vertices.push(p2);
+      .mesh.indices.push(i);
+      .mesh.indices.push(i+1);
+      .mesh.indices.push(i+2);
+      nml := (p2-p1).cross(p1-p0).dir();
+      .mesh.normals.push(nml);
+      .mesh.normals.push(nml);
+      .mesh.normals.push(nml);
+    }
+  }
+  func init(){
+    .generate_mesh();
+  }
+  func draw(){
+    .mesh.draw(.tran @* g3d.mat.scale(.size));
+    .tran @*= g3d.mat.rotate_deg(.axis.cross(g3d.AXIS_Y),1./.size);
+    .tran = g3d.mat.translate(...(.axis*(0.015/.size))) @* .tran
+    .area = ((.tran @* {0.;0;0;1}).xyz/grdsz) as vec[i32,3];
+    
+  }
+}
+
+typedef Player = {
+  tran := g3d.mat.id;
+  life := 3;
+  score := 0;
+}
+
+
+func generate_bullet_mesh():g3d.Mesh{
+  mesh := g3d.Mesh{};
+  verts := list[vec[f32,3]]{};
+  for (i := 0; i < icoverts.length(); i++){
+    verts.push(icoverts[i].dir()*{0.05,0.05,0.4});
+  }
+  for (i := 0; i < icofaces.length(); i+=3) {
+    p0 := verts[icofaces[i]];
+    p1 := verts[icofaces[i+1]];
+    p2 := verts[icofaces[i+2]];
+    mesh.vertices.push(p0);
+    mesh.vertices.push(p1);
+    mesh.vertices.push(p2);
+    mesh.indices.push(i);
+    mesh.indices.push(i+1);
+    mesh.indices.push(i+2);
+    nml := (p2-p1).cross(p1-p0).dir();
+    mesh.normals.push(nml);
+    mesh.normals.push(nml);
+    mesh.normals.push(nml);
+  }
+  return mesh;
+}
+typedef Bullet = {
+  tran := g3d.mat.id;
+  func draw(){
+    bullet_mesh.draw(.tran);
+    .tran @*= g3d.mat.translate(0.,0,-0.5);
+  }
+}
+bullet_mesh := generate_bullet_mesh();
+
+func ezinv(r:vec[f32,4,4]):vec[f32,4,4]{
+  return {
+    r[0,0],r[1,0],r[2,0],-r[0,0]*r[0,3]-r[1,0]*r[1,3]-r[2,0]*r[2,3];
+    r[0,1],r[1,1],r[2,1],-r[0,1]*r[0,3]-r[1,1]*r[1,3]-r[2,1]*r[2,3];
+    r[0,2],r[1,2],r[2,2],-r[0,2]*r[0,3]-r[1,2]*r[1,3]-r[2,2]*r[2,3];
+    0,0,0,1
+  };
+}
+
+areas := dict[vec[i32,3],i32]{};
+
+func generate_area(p:vec[i32,3]){
+  if (!areas[p]){
+    areas[p] = 1;
+    for (i:=0; i<3; i++){
+      rock := Rock{
+        area:p,
+        axis:rand.random({-1.,-1.,-1.},{1.,1.,1.}).dir(),
+        size:rand.random(1.0,2.0),
+        tran:g3d.mat.translate(...(p*grdsz+rand.random({grdsz as f32,grdsz,grdsz})))
+      };
+      rock.init();
+      rocks.push(rock);
+    }
+  }
+}
+
+
+rocks := list[Rock]{};
+player := Player{};
+bullets := list[Bullet]{};
+
+cam := g3d.Camera{}
+keys_held := dict[i32,i32]{};
+frame := 0;
+vel := {0.,0,0};
+avl := {0.,0,0};
+spd : f32 = 0.01;
+asd : f32 = 0.1;
+bullet_cd := 0;
+shaky := 0;
+
+hud := g3d.Camera{};
+hud.ortho(0,W/2,H/2,0,-1,1);
+
+while (1){
+  time.fps(60)
+  g3d.background(0.0)
+
+  cam.view = ezinv(player.tran);
+  cam.perspective(60,W/(H as f32),0.2,100.0);
+
+  ppos := ((player.tran @* {0.;0;0;1}).xyz/grdsz) as vec[i32,3];
+
+  vdst := 3;
+  for (x:=-vdst;x<=vdst;x++){
+    for (y:=-vdst;y<=vdst;y++){
+      for (z:=-vdst;z<=vdst;z++){
+        generate_area(ppos+{x,y,z});
+      }
+    }
+  }
+  // io.println(ppos)
+
+  frag.begin(lambert_material);
+  cam.begin();
+  for (i:=rocks.length()-1; i >=0; i--){
+    dif := rocks[i].area-ppos;
+    if (-vdst <= dif.x && dif.x <= vdst &&
+        -vdst <= dif.y && dif.y <= vdst &&
+        -vdst <= dif.z && dif.z <= vdst ){
+      rocks[i].draw();
+      rpos := (rocks[i].tran @* {0.;0;0;1}).xyz;
+
+      if (shaky <= 0){
+        dx := rpos - (player.tran @* {0.;0;0;1}).xyz
+        d := dx.mag();
+        if (d < rocks[i].size){
+          shaky = 20;
+          rocks[i].tran = g3d.mat.translate(...(dx)) @* rocks[i].tran;
+          player.life--;
+        }
+      }
+
+      for (j:=bullets.length()-1; j>=0; j--){
+        d := (rpos - (bullets[j].tran @* {0.;0;0;1}).xyz).mag();
+        if (d < rocks[i].size){
+          player.score += 10./rocks[i].size;
+          bullets.erase(j,j+1);
+          if (rocks[i].size > 0.1){
+            for (k := 0; k < 5; k++){
+              q := rand.random({-1.,-1.,-1.},{1.,1.,1.});
+              rock := Rock{
+                area:rocks[i].area,
+                axis:q.dir(),
+                size:rand.random(1.0,2.0)*rocks[i].size*0.3,
+                tran:g3d.mat.translate(...(q*0.3*rocks[i].size)) @* rocks[i].tran
+              };
+              rock.init();
+              rocks.push(rock);
+            }
+          }
+          rocks.erase(i,i+1);
+          break;
+        }
+      }
+    }
+  }
+  for (i:=bullets.length()-1; i>=0; i--){
+    bullets[i].draw();
+    d := ((player.tran @* {0.;0;0;1}).xyz - (bullets[i].tran @* {0.;0;0;1}).xyz).mag();
+    if (d > 10.0){
+      bullets.erase(i,i+1);
+    }
+  }
+  cam.end();
+  frag.end();
+
+  hud.begin();
+  life_str := "";
+  for (i:=0;i<player.life;i++)life_str+="A"
+  g3d.text(life_str,g3d.mat.translate(0,16,0));
+  g3d.text("%{player.score}",g3d.mat.id);
+  if (player.life<=0){
+    g3d.text("GAME OVER",g3d.mat.translate(124,112,0));
+  }
+  hud.end();
+
+  if (keys_held['a'] && keys_held['j']){
+    vel += {-spd,0,0};
+  }else if (keys_held['d'] && keys_held['l']){
+    vel += {spd,0,0};
+  }else if (keys_held['w'] && keys_held['i']){
+    vel += {0,0,-spd};
+  }else if (keys_held['s'] && keys_held['k']){
+    vel += {0,0,spd};
+  }else if (keys_held['s'] && keys_held['i']){
+    avl += {0,asd,0};
+  }else if (keys_held['w'] && keys_held['k']){
+    avl += {0,-asd,0};
+  }else if (keys_held['d'] && keys_held['j']){
+    avl += {-asd,0,0};
+  }else if (keys_held['a'] && keys_held['l']){
+    avl += {asd,0,0};
+  }else if (keys_held['a'] && keys_held['i']){
+    avl += {0,0,asd};
+  }else if (keys_held['w'] && keys_held['l']){
+    avl += {0,0,-asd};
+  }
+  if (keys_held[' ']){
+    if (bullet_cd % 20 == 0){
+      b := Bullet{tran:(player.tran@*g3d.mat.translate(0,-0.3,0))};
+      bullets.push(b);
+    }
+    bullet_cd++;
+  }else if (bullet_cd > 0){
+    bullet_cd=0;
+  }
+
+  if (shaky > 0){
+    player.tran @*= g3d.mat.translate(...(rand.random({-1.,-1.,-1.},{1.,1.,1.})*shaky*0.02));
+    shaky--;
+  }
+
+  vel *= 0.95;
+  avl *= 0.95;
+  player.tran @*= g3d.mat.translate(...vel);
+  player.tran @*= g3d.mat.rotate_deg(g3d.AXIS_Y,avl.y);
+  player.tran @*= g3d.mat.rotate_deg(g3d.AXIS_X,avl.x);
+  player.tran @*= g3d.mat.rotate_deg(g3d.AXIS_Z,avl.z);
+
+
+  g3d.flush();
+  e := win.poll();
+  if (player.life){
+    if (e.type == win.KEY_PRESSED){
+      keys_held[e.key] = 1;
+    }else if (e.type == win.KEY_RELEASED){
+      keys_held[e.key] = 0;
+    }
+  }
+  frame++;
+  
+}
