@@ -17,3 +17,7 @@ Generative building facade inspired by old appartment buildings in China.
 ## [ruin.dh](ruin.dh)
 Generative landscape. A port of [my first plotter drawing](https://ems.andrew.cmu.edu/2016-60212/ngdon/09/29/ngdon-plot/index.html).
 ![](https://github.com/user-attachments/assets/5171f12c-1c3a-46c8-b761-d784092fb54c)
+
+## [juju.dh](juju.dh)
+A 3D jujube-ish fruit with a mathematical shape.
+![](https://github.com/user-attachments/assets/ca0f3faa-caaa-47ad-ab04-e013fdef706a)
