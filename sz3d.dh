@@ -1,0 +1,401 @@
+include "std/g3d"
+include "std/win"
+include "std/list"
+include "std/rand"
+include "std/time"
+include "std/frag"
+include "std/vec"
+include "std/math"
+include "std/io"
+include "std/arr"
+
+W := 640;
+H := 480;
+nx := 100;
+nz := 100;
+PHI := 1.618034;
+
+context := win.init(W,H,win.CONTEXT_3D);
+frag.init(context);
+g3d.init(context);
+
+terrain := g3d.Mesh{};
+trees := g3d.Mesh{};
+builds := g3d.Mesh{};
+clouds := g3d.Mesh{};
+lamps := g3d.Mesh{mode:g3d.MODE_LINE_LIST};
+
+icoverts := list[vec[f32,3]]{
+  {-1,  PHI, 0}, { 1,  PHI, 0}, {-1, -PHI, 0}, { 1, -PHI, 0},
+  {0, -1,  PHI}, {0,  1,  PHI}, {0, -1, -PHI}, {0,  1, -PHI},
+  { PHI, 0, -1}, { PHI, 0,  1}, {-PHI, 0, -1}, {-PHI, 0,  1}
+};
+icofaces := list[i32]{
+  0,11,5,  0, 5, 1,  0, 1, 7,  0,7,10,  0,10,11,
+  1, 5,9,  5,11, 4, 11,10, 2, 10,7, 6,  7, 1, 8,
+  3, 9,4,  3, 4, 2,  3, 2, 6,  3,6, 8,  3, 8, 9,
+  4, 9,5,  2, 4,11,  6, 2,10,  8,6, 7,  9, 8, 1
+}
+
+cubverts:=list[vec[f32,3]]{
+  { 1.,-1.,-1.}, { 1., 1.,-1.}, { 1., 1., 1.}, { 1.,-1., 1.}, 
+  {-1.,-1., 1.}, {-1., 1., 1.}, {-1., 1.,-1.}, {-1.,-1.,-1.}, 
+  {-1., 1.,-1.}, {-1., 1., 1.}, { 1., 1., 1.}, { 1., 1.,-1.}, 
+  {-1.,-1., 1.}, {-1.,-1.,-1.}, { 1.,-1.,-1.}, { 1.,-1., 1.}, 
+  { 1.,-1., 1.}, { 1., 1., 1.}, {-1., 1., 1.}, {-1.,-1., 1.}, 
+  {-1.,-1.,-1.}, {-1., 1.,-1.}, { 1., 1.,-1.}, { 1.,-1.,-1.}
+};
+cubfaces:=list[i32]{
+   0,  1,  2,  0,  2,  3,
+   4,  5,  6,  4,  6,  7,
+   8,  9, 10,  8, 10, 11,
+  12, 13, 14, 12, 14, 15,
+  16, 17, 18, 16, 18, 19,
+  20, 21, 22, 20, 22, 23 
+};
+cubnorms:=list[vec[f32,3]]{
+  { 1., 0.,0.}, { 1., 0.,0.}, { 1., 0.,0.}, { 1., 0.,0.},
+  {-1., 0.,0.}, {-1., 0.,0.}, {-1., 0.,0.}, {-1., 0.,0.},
+  { 0., 1.,0.}, { 0., 1.,0.}, { 0., 1.,0.}, { 0., 1.,0.},
+  { 0.,-1.,0.}, { 0.,-1.,0.}, { 0.,-1.,0.}, { 0.,-1.,0.},
+  { 0.,0., 1.}, { 0.,0., 1.}, { 0.,0., 1.}, { 0.,0., 1.},
+  { 0.,0.,-1.}, { 0.,0.,-1.}, { 0.,0.,-1.}, { 0.,0.,-1.},
+};
+
+func sigmoid(x:f32,k:f32):f32{
+  return 1./(1.+math.exp(-k*(x-0.5)));
+}
+
+io.println("generating terrain...")
+
+for (i:=0; i<nz; i++){
+  for (j:=0; j<nx; j++){
+    h := rand.noise(i*0.04,j*0.04);
+    h = h**3;
+    tr := rand.noise(i*0.05,j*0.05,10);
+    v := {(j-nx*0.5)*0.2, h*10.0, (i-nz*0.5)*0.2}
+    if (tr > 0.5 && h < 0.35){
+      n := trees.vertices.length();
+      sz := rand.random(0.05,0.15);
+      for (k := 0; k < icoverts.length(); k++){
+        trees.vertices.push(icoverts[k]*sz+v);
+        trees.normals.push(icoverts[k].dir());
+        trees.colors.push({rand.random(0.6,1.0),sz,1.0,1.0});
+      }
+      for (k := 0; k < icofaces.length(); k++){
+        trees.indices.push(icofaces[k]+n);
+      }
+    }
+    bd := rand.noise(i*0.05,j*0.05,20);
+    if (bd > 0.45 && h < 0.2 && i%2 && j%2){
+      
+      n := builds.vertices.length();
+      sz := rand.random({0.1,0.1,0.1},{0.2,0.8+(bd>0.65)*2.0,0.2});
+      bc := rand.random(0.3,0.9);
+      cl := {bc+rand.random(0.2),bc+rand.random(0.2),bc+rand.random(0.2),1.0};
+      vv := v+{0.1,0.0,0.1};
+      for (k := 0; k < cubverts.length(); k++){
+        u := cubverts[k]*sz+vv;
+        builds.vertices.push(u);
+        builds.normals.push(cubnorms[k]);
+        y := cubverts[k].y*0.5+0.5;
+        builds.colors.push(cl*y);
+      }
+      for (k := 0; k < cubfaces.length(); k++){
+        builds.indices.push(cubfaces[k]+n);
+      }
+      ssz := sz*1.1;
+      
+      for (k := 0.; k < sz.y; k+=0.15){
+        lamps.vertices.push({vv.x-ssz.x,vv.y+k,vv.z-ssz.z});
+        lamps.vertices.push({vv.x+ssz.x,vv.y+k,vv.z-ssz.z});
+
+        lamps.vertices.push({vv.x+ssz.x,vv.y+k,vv.z-ssz.z});
+        lamps.vertices.push({vv.x+ssz.x,vv.y+k,vv.z+ssz.z});
+
+        lamps.vertices.push({vv.x+ssz.x,vv.y+k,vv.z+ssz.z});
+        lamps.vertices.push({vv.x-ssz.x,vv.y+k,vv.z+ssz.z});
+
+        lamps.vertices.push({vv.x-ssz.x,vv.y+k,vv.z+ssz.z});
+        lamps.vertices.push({vv.x-ssz.x,vv.y+k,vv.z-ssz.z});
+        lt := rand.random();
+        for (kk := 0; kk< 8; kk++){
+          lamps.colors.push({lt,0.,0.,1.});
+        }
+      }
+      
+    }
+    terrain.vertices.push(v);
+    terrain.normals.push({0.,1.,0.});
+    terrain.colors.push({tr,1.0,1.0,1.0});
+    if (i&&j){
+      terrain.indices.push(i*nx+j);
+      terrain.indices.push(i*nx+j-1);
+      terrain.indices.push((i-1)*nx+j);
+      terrain.indices.push(i*nx+j-1);
+      terrain.indices.push((i-1)*nx+j-1);
+      terrain.indices.push((i-1)*nx+j);
+    }
+  }
+}
+
+io.println("calculating normals...")
+
+for (i:=1; i<nz-1; i++){
+  for (j:=1; j<nx-1; j++){
+    o := terrain.vertices[i*nx+j];
+    a := terrain.vertices[i*nx+j-1]-o;
+    b := terrain.vertices[i*nx+j+1]-o;
+    c := terrain.vertices[(i-1)*nx+j]-o;
+    d := terrain.vertices[(i+1)*nx+j]-o;
+    bc := b.cross(c).dir();
+    ca := c.cross(a).dir();
+    ad := a.cross(d).dir();
+    db := d.cross(b).dir();
+    nml := (bc+ca+ad+db)*0.25;
+    terrain.normals[i*nx+j] = nml;
+  }
+}
+
+io.println("generating clouds...")
+
+pixels := arr.make({nz,nx,4},255 as u8);
+rand.noise_detail(3,0.5)
+for (i:=0; i<nz; i++){
+  t := i*2.0*math.PI/nz;
+  cost := math.cos(t);
+  sint := math.sin(t);
+  for (j:=0; j<nx; j++){
+    h := sigmoid(rand.noise(j*0.1,10+cost*2.,3+sint*2.)/0.875,2.);
+    v := {(j-nx*0.5)*0.2, h*3.0+1.5, (i-nz*0.5)*0.2}
+    clouds.vertices.push(v);
+    clouds.normals.push({0.,1.,0.});
+    clouds.uvs.push({(i as f32)/nz,(j as f32)/nx});
+    pixels[i,j,3] = h*255;
+    if (i&&j){
+      clouds.indices.push(i*nx+j);
+      clouds.indices.push(i*nx+j-1);
+      clouds.indices.push((i-1)*nx+j);
+      clouds.indices.push(i*nx+j-1);
+      clouds.indices.push((i-1)*nx+j-1);
+      clouds.indices.push((i-1)*nx+j);
+    }
+  }
+}
+image := frag.texture(...pixels.shape().yx);
+image.write_pixels(pixels);
+
+io.println("calculating normals...")
+
+for (i:=0; i<nz; i++){
+  for (j:=1; j<nx-1; j++){
+    o := clouds.vertices[i*nx+j];
+    a := clouds.vertices[i*nx+j-1]-o;
+    b := clouds.vertices[i*nx+j+1]-o;
+    c := clouds.vertices[((i-1+nz)%nz)*nx+j]-o;
+    d := clouds.vertices[(i+1)%nz*nx+j]-o;
+    bc := b.cross(c).dir();
+    ca := c.cross(a).dir();
+    ad := a.cross(d).dir();
+    db := d.cross(b).dir();
+    nml := (bc+ca+ad+db)*0.25;
+    clouds.normals[i*nx+j] = nml;
+  }
+}
+
+func highlight(v:vec[f32,3]):vec[f32,3]{
+  t := math.abs(v.y);
+  if (v.y > 0.){
+    return {1.0,0.4,0.0}*(1.-t)+{1.0,0.85,0.8}*t
+  }else{
+    return {1.0,0.4,0.0}*(1.-t)+{0.4,0.4,0.7}*t
+  }
+}
+func darklight(v:vec[f32,3]):vec[f32,3]{
+  t := math.abs(v.y);
+  if (v.y > 0.){
+    return {0.9,0.8,1.0}*(1.-t)+{1.0,1.0,1.0}*t
+  }else{
+    return {0.9,0.8,1.0}*(1.-t)+{0.5,0.5,0.8}*t
+  }
+}
+
+shader0 := frag.program(embed(func(
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @varying color:vec[f32,4],
+  @uniform light:vec[f32,3],
+  @varying position:vec[f32,3],
+):vec[f32,4]{
+  dark0 := {0.4,0.3,0.1};
+  high0 := {0.8,0.7,0.6};
+
+  dark1 := {0.15,0.2,0.25};
+  high1 := {0.2,0.35,0.4};
+
+  dark2 := {0.3,0.3,0.0};
+  high2 := {0.1,0.2,0.0};
+
+  y := position.y / 2.0;
+  yt := sigmoid(y,4.);
+  tt := sigmoid(color.x*(1.0-position.y*0.02)+0.05,50.);
+
+  dark := (dark0 * (1.-yt) + dark1 * yt) * (1.-tt) + dark2*tt;
+  high := (high0 * (1.-yt) + high1 * yt) * (1.-tt) + high2*tt;
+
+  dark *= darklight(light);
+  high *= highlight(light);
+
+  ndl := math.max(0.,normal.dot(light));
+  col := dark * (1.-ndl) + high * ndl;
+  
+  return {col.r,col.g,col.b,1.0};
+}) as "fragment");
+
+shader1 := frag.program(embed(func(
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @varying color:vec[f32,4],
+  @uniform light:vec[f32,3],
+  @varying position:vec[f32,3],
+):vec[f32,4]{
+  dark0 := {0.0,0.1,0.0};
+  high0 := {0.1,0.2,0.0};
+
+  dark1 := {0.4,0.4,0.1};
+  high1 := {0.2,0.3,0.1};
+
+  yt := normal.y;
+  dark := dark0 * (1.-yt) + dark1 * yt;
+  high := high0 * (1.-yt) + high1 * yt;
+
+  dark *= darklight(light);
+  high *= highlight(light);
+
+  ndl := math.max(0.,normal.dot(light));
+  col := dark * (1.-ndl) + high * ndl;
+  col = col * (color.y*2.+0.4) * color.x;
+
+  return {col.r,col.g,col.b,1.0};
+}) as "fragment");
+
+
+shader2 := frag.program(embed(func(
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @varying color:vec[f32,4],
+  @uniform light:vec[f32,3],
+):vec[f32,4]{
+  dark := color.rgb*0.2;
+  high := color.rgb*0.9;
+  dark *= darklight(light);
+  high *= highlight(light);
+  ndl := math.max(0.,normal.dot(light));
+  col := dark * (1.-ndl) + high * ndl;
+  return {col.r,col.g,col.b,1.0};
+
+}) as "fragment");
+
+
+shader3 := frag.program(embed(func(
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @varying color:vec[f32,4],
+  @uniform light:vec[f32,3],
+  @uniform image:frag.Texture,
+  @varying position:vec[f32,3],
+  @uniform t:f32,
+):vec[f32,4]{
+  dark := {0.3,0.4,0.6};
+  high := {1.,1.,1.};
+
+  dark *= darklight(light);
+  high *= highlight(light);
+
+  ndl := math.max(0.,normal.dot(light));
+  col := dark * (1.-ndl) + high * ndl;
+  uvy := (uv.y + t*0.002)%1.0;
+  h := image.sample({uv.x,uvy}).w;
+  a := sigmoid(math.max(0.,h*5.-1.)/4.,30.);
+  return {col.r,col.g,col.b,a};
+}) as "fragment");
+
+
+shader4 := frag.program(embed(func(
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @varying color:vec[f32,4],
+  @uniform light:vec[f32,3],
+  @varying position:vec[f32,3],
+  @uniform t:f32,
+):vec[f32,4]{
+  if (light.y < 0.1-color.x && color.x < 0.5){
+    return {1.0,0.6,0.2,1.0};
+  }else{
+    return {0.0,0.0,0.0,1.0};
+  }
+}) as "fragment");
+
+
+cam := g3d.Camera{}
+cam.look_at({0,15,15},{0,0,0},g3d.AXIS_Y);
+cam.perspective(45,W/(H as f32),0.1,100.0);
+
+light := ({3,2,1}).dir()
+
+io.println("rendering...")
+
+frame := 0;
+while (1){
+  time.fps(120);
+
+  // g3d.background(0.3,0.6,0.9);
+  g3d.background(0);
+
+  day := frame*0.002+0.1;
+  light = ({math.cos(day),math.sin(day),0});
+  model := g3d.mat.rotate_deg(g3d.AXIS_Y,frame*0.2);
+
+  frag.begin(shader0);
+  frag.uniform("light",light);
+  cam.begin();
+  terrain.draw(model);
+  cam.end();
+  frag.end();
+
+  frag.begin(shader1);
+  frag.uniform("light",light);
+  cam.begin();
+  trees.draw(model);
+  cam.end();
+  frag.end();
+  
+  frag.begin(shader2);
+  frag.uniform("light",light);
+  cam.begin();
+  builds.draw(model);
+  cam.end();
+  frag.end();
+
+  frag.begin(shader4);
+  frag.uniform("light",light);
+  cam.begin();
+  lamps.draw(model);
+  cam.end();
+  frag.end();
+
+  frag.begin(shader3);
+  frag.uniform("light",light);
+  frag.uniform("image",image);
+  frag.uniform("t",frame as f32);
+  cam.begin();
+  clouds.draw(model);
+  cam.end();
+  frag.end();
+
+
+
+  win.poll();
+  frame++;
+}
+
