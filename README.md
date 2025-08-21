@@ -21,3 +21,7 @@ Generative landscape. A port of [my first plotter drawing](https://ems.andrew.cm
 ## [juju.dh](juju.dh)
 A 3D jujube-ish fruit with a mathematical shape.
 ![](https://github.com/user-attachments/assets/ca0f3faa-caaa-47ad-ab04-e013fdef706a)
+
+## [sz3d.dh](sz3d.dh)
+3D cityscape inspired by buildings and hills in Shenzhen, China. Features day/night cycles.
+![](https://github.com/user-attachments/assets/a0a4c550-564d-4f00-89b2-ca0f56d05a4f)
