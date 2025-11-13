@@ -1,0 +1,377 @@
+// curl https://casual-effects.com/g3d/data10/common/model/crytek_sponza/sponza.zip > /tmp/sponza.zip
+// unzip /tmp/sponza.zip -d /tmp/sponza
+
+include "std/io"
+include "std/str"
+include "std/list"
+include "std/arr"
+include "std/vec"
+include "std/dict"
+include "std/math"
+include "std/frag"
+include "std/rdr"
+include "std/img"
+include "std/win"
+
+W := 640
+H := 480
+
+context := win.init(W,H,win.CONTEXT_3D);
+frag.init(context);
+rdr.init(context);
+
+typedef Mtl = {
+  Ns:=10.0;
+  Ni:=1.0;
+  d :=1.0;
+  Tr:=0.0;
+  Tf:={1.,1.,1.};
+  illum:=2;
+  Ka:={1.,1.,1.};
+  Kd:={1.,1.,1.};
+  Ks : vec[f32,3];
+  Ke : vec[f32,3];
+  map := dict[str,rdr.Texture]{};
+}
+
+typedef Obj = {
+  mesh: rdr.Mesh;
+  mtl : Mtl;
+}
+
+func read_mtl(pth:str):dict[str,Mtl]{
+  folder := "/".join(pth.split("/").slice(0,-1));
+  mtls := dict[str,Mtl]{};
+  mtl : Mtl;
+  txt := str.decode(io.read_file(pth),'utf-8');
+  lns := txt.split("\n")
+  for (i := 0; i < lns.length(); i++){
+    l := lns[i].trim("\t",str.LEADING);
+    if (l[0] == '#') continue;
+    cmd := l.split(" ").filter(func(x:str):i32{
+      return x.length();
+    });
+    if (!cmd.length()) continue;
+    if (cmd[0] == "newmtl"){
+      mtl = Mtl{};
+      mtls[cmd[1]] = mtl;
+    }else if (cmd[0] == "Ns"){
+      mtl.Ns = cmd[1] as f32;
+    }else if (cmd[0] == "Ni"){
+      mtl.Ni = cmd[1] as f32;
+    }else if (cmd[0] == "d"){
+      mtl.d = cmd[1] as f32;
+    }else if (cmd[0] == "Tr"){
+      mtl.Tr = cmd[1] as f32;
+    }else if (cmd[0] == "Tf"){
+      mtl.Tf = {cmd[1] as f32,cmd[2] as f32,cmd[3] as f32};
+    }else if (cmd[0] == "illum"){
+      mtl.illum = cmd[1] as f32;
+    }else if (cmd[0] == "Ka"){
+      mtl.Ka = {cmd[1] as f32,cmd[2] as f32,cmd[3] as f32};
+    }else if (cmd[0] == "Kd"){
+      mtl.Kd = {cmd[1] as f32,cmd[2] as f32,cmd[3] as f32};
+    }else if (cmd[0] == "Ks"){
+      mtl.Ks = {cmd[1] as f32,cmd[2] as f32,cmd[3] as f32};
+    }else if (cmd[0] == "Ke"){
+      mtl.Ke = {cmd[1] as f32,cmd[2] as f32,cmd[3] as f32};
+    }else if (cmd[0] == "map_Kd" || cmd[0] == "map_Ks" || cmd[0] == "map_bump"){
+      fn := folder+"/"+("/".join(cmd[1].split("\\")));
+      pix := img.decode(io.read_file(fn));
+      tex := frag.texture(...pix.shape().yx, frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+      tex.write_pixels(pix);
+      mtl.map[cmd[0]] = tex;
+    }else{
+
+    }
+  }
+  return mtls;
+}
+
+func read_obj(pth:str):list[Obj]{
+
+  folder := "/".join(pth.split("/").slice(0,-1));
+
+  objs := list[Obj]{};
+  obj : Obj;
+  mtls : dict[str,Mtl];
+
+  vs := list[vec[f32,3]]{};
+  vns := list[vec[f32,3]]{};
+  vts := list[vec[f32,2]]{};
+
+  txt := str.decode(io.read_file(pth),'utf-8');
+  lns := txt.split("\n")
+  for (i := 0; i < lns.length(); i++){
+    if (i % 50000 == 0){
+      io.println("loading %{pth} : %{i}/%{lns.length()}");
+    }
+    if (lns[i][0] == '#') continue;
+    cmd := lns[i].split(" ").filter(func(x:str):i32{
+      return x.length();
+    });
+    if (!cmd.length()) continue;
+
+    if (cmd[0] == "v"){
+      vs.push({cmd[1] as f32,cmd[2] as f32,cmd[3] as f32});
+    }else if (cmd[0] == "f"){
+      fdat := list[i32]{};
+      for (j:=1; j<cmd.length(); j++){
+        args := cmd[j].split("/");
+        fdat.push(args[0] as i32);
+        fdat.push(args[1] as i32);
+        fdat.push(args[2] as i32);
+      }
+      // io.println(fdat);
+      for (j:=1; j<fdat.length()/3-1; j++){
+        obj.mesh.vertices.push(vs[fdat[0]-1]);
+        obj.mesh.vertices.push(vs[fdat[j*3]-1]);
+        obj.mesh.vertices.push(vs[fdat[(j+1)*3]-1]);
+
+        obj.mesh.uvs.push(vts[fdat[1]-1]);
+        obj.mesh.uvs.push(vts[fdat[j*3+1]-1]);
+        obj.mesh.uvs.push(vts[fdat[(j+1)*3+1]-1]);
+
+        obj.mesh.normals.push(vns[fdat[2]-1]);
+        obj.mesh.normals.push(vns[fdat[j*3+2]-1]);
+        obj.mesh.normals.push(vns[fdat[(j+1)*3+2]-1]);
+      }
+    }else if (cmd[0] == "vt"){
+      vts.push({cmd[1] as f32,cmd[2] as f32});
+    }else if (cmd[0] == "vn"){
+      vns.push({cmd[1] as f32,cmd[2] as f32,cmd[3] as f32});
+    }else if (cmd[0] == "usemtl"){
+      obj = Obj{
+        mesh:rdr.Mesh{},
+        mtl:mtls[cmd[1]],
+      }
+      objs.push(obj);
+    }else if (cmd[0] == 'mtllib'){
+      mpth := folder + "/" + ("/".join(cmd[1].split("\\")));
+      mtls = read_mtl(mpth);
+    }else{
+      
+    }
+  }
+  return objs;
+}
+
+
+
+
+func compute_tbn(
+  Ng : vec[f32,3],
+  dpdx:vec[f32,3],dpdy:vec[f32,3],
+  dtdx:vec[f32,2],dtdy:vec[f32,2],
+):vec[f32,3,3]{
+  det := dtdx.x*dtdy.y - dtdy.x*dtdx.y;
+  T := dpdx * (dtdy.y/det) + dpdy * (-dtdx.y/det);
+  B := dpdx * (-dtdy.x/det) + dpdy * (dtdx.x/det);
+  T = (T - Ng * Ng.dot(T)).dir();
+  B = (B - Ng * Ng.dot(B)).dir();
+  N := T.cross(B).dir();
+  if (N.dot(Ng)<0.0){
+    N *= -1.;
+  }
+  return {
+    T.x, T.y, T.z;
+    B.x, B.y, B.z;
+    N.x, N.y, N.z;
+  }
+}
+func gradient(
+  htex:frag.Texture, uv:vec[f32,2], texel:vec[f32,2]
+):vec[f32,2]{
+  h  := htex.sample(uv).r;
+  hU := htex.sample({(uv.x+texel.x)%1.0,uv.y}).r;
+  hV := htex.sample({uv.x,(uv.y+texel.y)%1.0}).r;
+  dhu := (hU - h) / texel.x;
+  dhv := (hV - h) / texel.y;
+  return {dhu,dhv};
+}
+
+func perturb(tbn:vec[f32,3,3], dhuv:vec[f32,2], scale:f32):vec[f32,3]{
+  T := {tbn[0,0],tbn[0,1],tbn[0,2]};
+  B := {tbn[1,0],tbn[1,1],tbn[1,2]};
+  N := {tbn[2,0],tbn[2,1],tbn[2,2]};
+  return (N - scale * (dhuv.x * T + dhuv.y * B)).dir();
+}
+
+func illum2(
+  @varying normal : vec[f32,3],
+  @varying position : vec[f32,3],
+  @varying uv : vec[f32,2],
+  @uniform map_Ks   : frag.Texture,
+  @uniform map_Kd   : frag.Texture,
+  @uniform map_bump : frag.Texture,
+  @uniform has_map_Ks  : i32,
+  @uniform has_map_Kd  : i32,
+  @uniform has_map_bump: i32,
+  @uniform Ka : vec[f32,3], // ambient
+  @uniform Kd : vec[f32,3], // diffuse
+  @uniform Ks : vec[f32,3], // specular
+  @uniform Ke : vec[f32,3], // emissive
+  @uniform Ns : f32,        // shininess
+  @builtin frag_coord : vec[f32,4],
+  @derived d_position_dx : vec[f32,3],
+  @derived d_position_dy : vec[f32,3],
+  @derived d_uv_dx : vec[f32,2],
+  @derived d_uv_dy : vec[f32,2],
+  @uniform eye : vec[f32,3],
+  @uniform l_dir : vec[f32,3],
+  @uniform l_col : vec[f32,3],
+  @uniform a_col : vec[f32,3],
+) : vec[f32,4] {
+
+  nml := normal;
+
+  if (has_map_bump!=0){
+    texel := uv/frag_coord.xy;
+    dhuv := gradient(map_bump,uv,texel);
+    tbn := compute_tbn(
+      normal,d_position_dx,d_position_dy,
+      d_uv_dx,d_uv_dy
+    );
+    nml = perturb(tbn,dhuv,0.02);
+  }
+
+  base := Kd;
+  spec := Ks;
+  ambi := Ka;
+  alph := 1.0;
+  if (has_map_Kd!=0){
+    samp := map_Kd.sample(uv);
+    base *= samp.xyz;
+    ambi *= samp.xyz;
+    if (samp.w < 0.5){
+      alph = -1.0;
+    }
+  }
+  if (has_map_Ks!=0){
+    spec *= map_Ks.sample(uv).xyz;
+  }
+
+  view_dir := eye - position;
+  half_vec := (l_dir + view_dir).dir();
+  ndl := math.max(nml.dot(l_dir),0.0);
+  ndh := math.max(nml.dot(half_vec),0.0);
+
+  amb := a_col * ambi;
+  dfs := l_col * base * ndl;
+  spc := l_col * spec * (ndh ** Ns);
+  ems := Ke;
+
+  color := amb + dfs + spc + ems;
+
+  return {...color, alph};
+}
+
+normal_material := frag.program(embed (func(@varying normal:vec[f32,3]):vec[f32,4]{
+  c := normal*0.5+0.5;
+  return {c.x,c.y,c.z,1.0};
+}) as "fragment");
+
+phong_material := frag.program(embed illum2 as "fragment");
+
+objs := read_obj("/tmp/sponza/sponza.obj");
+
+cam := rdr.Camera{};
+cam.perspective(60,W/(H as f32),1.0,10000.0);
+frame := 0;
+
+eye := {748.691650,404.096924,-57.136509};
+
+yaw := 4.69;
+pitch := 0.2;
+
+vel := {0.,0.,0.};
+spd := 0.5;
+asp := 0.01;
+
+keys_held := dict[i32,i32]{};
+drag := {0.,0.,0.};
+
+io.println("starting...")
+
+while (1){
+  rdr.background(0.5);
+
+  forward := {
+    math.cos(pitch)*math.sin(yaw),
+    math.sin(pitch),
+    math.cos(pitch)*math.cos(yaw)
+  }
+  right := forward.cross({0.,1.,0.});
+  up := right.cross(forward);
+
+  // io.println("%{eye} %{yaw} %{pitch}");
+
+  cam.look_at(eye,eye+forward,rdr.AXIS_Y);
+
+  for (i:=0; i<objs.length(); i++){
+    frag.begin(phong_material);
+    cam.begin();
+    frag.uniform("eye",eye);
+    frag.uniform("l_dir",{1.0,3.0,2.0}.dir());
+    frag.uniform("l_col",{0.9,0.8,0.7});
+    frag.uniform("a_col",{0.2,0.2,0.2});
+
+    frag.uniform("Ka",objs[i].mtl.Ka);
+    frag.uniform("Kd",objs[i].mtl.Kd);
+    frag.uniform("Ks",objs[i].mtl.Ks);
+    frag.uniform("Ke",objs[i].mtl.Ke);
+    frag.uniform("Ns",objs[i].mtl.Ns);
+
+    frag.uniform("has_map_Kd",  0);
+    frag.uniform("has_map_Ks",  0);
+    frag.uniform("has_map_bump",0);
+    map_keys := objs[i].mtl.map.keys();
+    for (j:=0;j<map_keys.length();j++){
+      key := map_keys[j];
+      frag.uniform("has_"+key, 1);
+      frag.uniform(key, objs[i].mtl.map[key]);
+    }
+    objs[i].mesh.draw(rdr.mat.id);
+    cam.end();
+    frag.end();
+  }
+
+  if (keys_held['w']){
+    vel += forward*spd;
+  }
+  if (keys_held['s']){
+    vel -= forward*spd;
+  }
+  if (keys_held['a']){
+    vel -= right*spd;
+  }
+  if (keys_held['d']){
+    vel += right*spd;
+  }
+  vel *= 0.9;
+  eye += vel;
+
+  e := win.poll();
+  if (e.type == win.KEY_PRESSED){
+    keys_held[e.key] = 1;
+  }else if (e.type == win.KEY_RELEASED){
+    keys_held[e.key] = 0;
+  }else if (e.type == win.MOUSE_PRESSED){
+    drag = {e.x,e.y,1.0};
+    
+  }else if (e.type == win.MOUSE_RELEASED){
+    drag = {e.x,e.y,0.0};
+  }else if (e.type == win.MOUSE_MOVED){
+    if (drag.z){
+      dx := drag.x - e.x;
+      dy := drag.y - e.y;
+      
+      yaw -= dx*asp;
+      pitch -= dy*asp;
+      pitch = math.min(math.max(pitch,-math.PI/2+0.01),math.PI/2-0.01);
+      drag = {e.x,e.y,1.0};
+    }
+  }
+  
+  frame++;
+}

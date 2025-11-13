@@ -1,4 +1,4 @@
-include "std/g3d"
+include "std/rdr"
 include "std/list"
 include "std/win"
 include "std/rand"
@@ -8,13 +8,15 @@ include "std/io"
 include "std/vec"
 include "std/arr"
 include "std/time"
+include "std/snd"
 
 W := 640
 H := 480
 grdsz := 10;
 context := win.init(W,H,win.CONTEXT_3D)
-g3d.init(context);
+rdr.init(context);
 frag.init(context);
+snd.init(8000,1);
 
 ord_dith_map := arr[i32,1]{
    0,48,12,60, 3,51,15,63,
@@ -93,9 +95,9 @@ func generate_icosphere(){
 generate_icosphere();
 
 typedef Rock = {
-  mesh := g3d.Mesh{};
-  tran := g3d.mat.id;
-  axis := g3d.AXIS_X
+  mesh := rdr.Mesh{};
+  tran := rdr.mat.id;
+  axis := rdr.AXIS_X
   area := {0,0,0};
   size := 1.;
   func generate_mesh(){
@@ -126,23 +128,23 @@ typedef Rock = {
     .generate_mesh();
   }
   func draw(){
-    .mesh.draw(.tran @* g3d.mat.scale(.size));
-    .tran @*= g3d.mat.rotate_deg(.axis.cross(g3d.AXIS_Y),1./.size);
-    .tran = g3d.mat.translate(...(.axis*(0.015/.size))) @* .tran
+    .mesh.draw(.tran @* rdr.mat.scale(.size));
+    .tran @*= rdr.mat.rotate_deg(.axis.cross(rdr.AXIS_Y),1./.size);
+    .tran = rdr.mat.translate(...(.axis*(0.015/.size))) @* .tran
     .area = ((.tran @* {0.;0;0;1}).xyz/grdsz) as vec[i32,3];
     
   }
 }
 
 typedef Player = {
-  tran := g3d.mat.id;
+  tran := rdr.mat.id;
   life := 3;
   score := 0;
 }
 
 
-func generate_bullet_mesh():g3d.Mesh{
-  mesh := g3d.Mesh{};
+func generate_bullet_mesh():rdr.Mesh{
+  mesh := rdr.Mesh{};
   verts := list[vec[f32,3]]{};
   for (i := 0; i < icoverts.length(); i++){
     verts.push(icoverts[i].dir()*{0.05,0.05,0.4});
@@ -165,10 +167,10 @@ func generate_bullet_mesh():g3d.Mesh{
   return mesh;
 }
 typedef Bullet = {
-  tran := g3d.mat.id;
+  tran := rdr.mat.id;
   func draw(){
     bullet_mesh.draw(.tran);
-    .tran @*= g3d.mat.translate(0.,0,-0.5);
+    .tran @*= rdr.mat.translate(0.,0,-0.5);
   }
 }
 bullet_mesh := generate_bullet_mesh();
@@ -192,7 +194,7 @@ func generate_area(p:vec[i32,3]){
         area:p,
         axis:rand.random({-1.,-1.,-1.},{1.,1.,1.}).dir(),
         size:rand.random(1.0,2.0),
-        tran:g3d.mat.translate(...(p*grdsz+rand.random({grdsz as f32,grdsz,grdsz})))
+        tran:rdr.mat.translate(...(p*grdsz+rand.random({grdsz as f32,grdsz,grdsz})))
       };
       rock.init();
       rocks.push(rock);
@@ -205,7 +207,7 @@ rocks := list[Rock]{};
 player := Player{};
 bullets := list[Bullet]{};
 
-cam := g3d.Camera{}
+cam := rdr.Camera{}
 keys_held := dict[i32,i32]{};
 frame := 0;
 vel := {0.,0,0};
@@ -215,12 +217,20 @@ asd : f32 = 0.1;
 bullet_cd := 0;
 shaky := 0;
 
-hud := g3d.Camera{};
+hud := rdr.Camera{};
 hud.ortho(0,W/2,H/2,0,-1,1);
 
+io.println("[WASD + IJKL] to move (differential drive), [Space] to shoot");
+
 while (1){
-  time.fps(60)
-  g3d.background(0.0)
+  time.fps(60);
+
+  for (n := 0; n < 8000; n++){
+    if (snd.buffer_full()) break;
+    snd.put_sample(bullet_cd%2);
+  }
+
+  rdr.background(0.0)
 
   cam.view = ezinv(player.tran);
   cam.perspective(60,W/(H as f32),0.2,100.0);
@@ -252,7 +262,7 @@ while (1){
         d := dx.mag();
         if (d < rocks[i].size){
           shaky = 20;
-          rocks[i].tran = g3d.mat.translate(...(dx)) @* rocks[i].tran;
+          rocks[i].tran = rdr.mat.translate(...(dx)) @* rocks[i].tran;
           player.life--;
         }
       }
@@ -269,7 +279,7 @@ while (1){
                 area:rocks[i].area,
                 axis:q.dir(),
                 size:rand.random(1.0,2.0)*rocks[i].size*0.3,
-                tran:g3d.mat.translate(...(q*0.3*rocks[i].size)) @* rocks[i].tran
+                tran:rdr.mat.translate(...(q*0.3*rocks[i].size)) @* rocks[i].tran
               };
               rock.init();
               rocks.push(rock);
@@ -294,10 +304,10 @@ while (1){
   hud.begin();
   life_str := "";
   for (i:=0;i<player.life;i++)life_str+="A"
-  g3d.text(life_str,g3d.mat.translate(0,16,0));
-  g3d.text("%{player.score}",g3d.mat.id);
+  rdr.text(life_str,rdr.mat.translate(0,16,0));
+  rdr.text("%{player.score}",rdr.mat.id);
   if (player.life<=0){
-    g3d.text("GAME OVER",g3d.mat.translate(124,112,0));
+    rdr.text("GAME OVER",rdr.mat.translate(124,112,0));
   }
   hud.end();
 
@@ -324,7 +334,7 @@ while (1){
   }
   if (keys_held[' ']){
     if (bullet_cd % 20 == 0){
-      b := Bullet{tran:(player.tran@*g3d.mat.translate(0,-0.3,0))};
+      b := Bullet{tran:(player.tran@*rdr.mat.translate(0,-0.3,0))};
       bullets.push(b);
     }
     bullet_cd++;
@@ -333,19 +343,19 @@ while (1){
   }
 
   if (shaky > 0){
-    player.tran @*= g3d.mat.translate(...(rand.random({-1.,-1.,-1.},{1.,1.,1.})*shaky*0.02));
+    player.tran @*= rdr.mat.translate(...(rand.random({-1.,-1.,-1.},{1.,1.,1.})*shaky*0.02));
     shaky--;
   }
 
   vel *= 0.95;
   avl *= 0.95;
-  player.tran @*= g3d.mat.translate(...vel);
-  player.tran @*= g3d.mat.rotate_deg(g3d.AXIS_Y,avl.y);
-  player.tran @*= g3d.mat.rotate_deg(g3d.AXIS_X,avl.x);
-  player.tran @*= g3d.mat.rotate_deg(g3d.AXIS_Z,avl.z);
+  player.tran @*= rdr.mat.translate(...vel);
+  player.tran @*= rdr.mat.rotate_deg(rdr.AXIS_Y,avl.y);
+  player.tran @*= rdr.mat.rotate_deg(rdr.AXIS_X,avl.x);
+  player.tran @*= rdr.mat.rotate_deg(rdr.AXIS_Z,avl.z);
 
 
-  g3d.flush();
+  rdr.flush();
   e := win.poll();
   if (player.life){
     if (e.type == win.KEY_PRESSED){

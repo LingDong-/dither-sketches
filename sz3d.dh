@@ -1,4 +1,4 @@
-include "std/g3d"
+include "std/rdr"
 include "std/win"
 include "std/list"
 include "std/rand"
@@ -17,13 +17,13 @@ PHI := 1.618034;
 
 context := win.init(W,H,win.CONTEXT_3D);
 frag.init(context);
-g3d.init(context);
+rdr.init(context);
 
-terrain := g3d.Mesh{};
-trees := g3d.Mesh{};
-builds := g3d.Mesh{};
-clouds := g3d.Mesh{};
-lamps := g3d.Mesh{mode:g3d.MODE_LINE_LIST};
+terrain := rdr.Mesh{};
+trees := rdr.Mesh{};
+builds := rdr.Mesh{};
+clouds := rdr.Mesh{};
+lamps := rdr.Mesh{mode:rdr.MODE_LINE_LIST};
 
 icoverts := list[vec[f32,3]]{
   {-1,  PHI, 0}, { 1,  PHI, 0}, {-1, -PHI, 0}, { 1, -PHI, 0},
@@ -206,9 +206,9 @@ for (i:=0; i<nz; i++){
 func highlight(v:vec[f32,3]):vec[f32,3]{
   t := math.abs(v.y);
   if (v.y > 0.){
-    return {1.0,0.4,0.0}*(1.-t)+{1.0,0.85,0.8}*t
+    return {1.1,0.5,0.1}*(1.-t)+{1.2,1.05,1.0}*t
   }else{
-    return {1.0,0.4,0.0}*(1.-t)+{0.4,0.4,0.7}*t
+    return {1.1,0.5,0.1}*(1.-t)+{0.4,0.4,0.7}*t
   }
 }
 func darklight(v:vec[f32,3]):vec[f32,3]{
@@ -337,8 +337,8 @@ shader4 := frag.program(embed(func(
 }) as "fragment");
 
 
-cam := g3d.Camera{}
-cam.look_at({0,15,15},{0,0,0},g3d.AXIS_Y);
+cam := rdr.Camera{}
+cam.look_at({0,15,15},{0,0,0},rdr.AXIS_Y);
 cam.perspective(45,W/(H as f32),0.1,100.0);
 
 light := ({3,2,1}).dir()
@@ -349,12 +349,12 @@ frame := 0;
 while (1){
   time.fps(120);
 
-  // g3d.background(0.3,0.6,0.9);
-  g3d.background(0);
+  // rdr.background(0.3,0.6,0.9);
+  rdr.background(0);
 
   day := frame*0.002+0.1;
   light = ({math.cos(day),math.sin(day),0});
-  model := g3d.mat.rotate_deg(g3d.AXIS_Y,frame*0.2);
+  model := rdr.mat.rotate_deg(rdr.AXIS_Y,frame*0.2);
 
   frag.begin(shader0);
   frag.uniform("light",light);
