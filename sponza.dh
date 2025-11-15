@@ -204,6 +204,7 @@ func illum2(
   @uniform map_Ks   : frag.Texture,
   @uniform map_Kd   : frag.Texture,
   @uniform map_bump : frag.Texture,
+  @uniform map_shdw : frag.Texture,
   @uniform has_map_Ks  : i32,
   @uniform has_map_Kd  : i32,
   @uniform has_map_bump: i32,
@@ -221,6 +222,7 @@ func illum2(
   @uniform l_dir : vec[f32,3],
   @uniform l_col : vec[f32,3],
   @uniform a_col : vec[f32,3],
+  @uniform shadow_matrix:vec[f32,4,4],
 ) : vec[f32,4] {
 
   nml := normal;
@@ -263,12 +265,33 @@ func illum2(
 
   color := amb + dfs + spc + ems;
 
+  bias := 0.01;
+  shadow_coord := (shadow_matrix @* {position.x,position.y,position.z,1.0}).xyzw;
+  sh := (shadow_coord.xyz/shadow_coord.w)*0.5+0.5;
+  samp := 1.0;
+  for (i:=-2; i<=2; i++){
+    for (j:=-2; j<=2; j++){
+      if (map_shdw.sample(sh.xy+{(i as f32),j}*0.001).x<sh.z-bias){
+        samp -= 0.022;
+      }
+    }
+  }
+  color *= samp;
+
   return {...color, alph};
 }
 
 normal_material := frag.program(embed (func(@varying normal:vec[f32,3]):vec[f32,4]{
   c := normal*0.5+0.5;
   return {c.x,c.y,c.z,1.0};
+}) as "fragment");
+
+shadow_material := frag.program(embed(func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3]
+):vec[f32,4]{
+  c := frag_coord.z;
+  return {c,c,c,1.0};
 }) as "fragment");
 
 phong_material := frag.program(embed illum2 as "fragment");
@@ -291,10 +314,18 @@ asp := 0.01;
 keys_held := dict[i32,i32]{};
 drag := {0.,0.,0.};
 
+map_shdw := frag.texture(1024,1024);
+
 io.println("starting...")
 
 while (1){
-  rdr.background(0.5);
+  rdr.background(0.61,0.63,0.65);
+
+  l_dir := {1.0,5.0,2.0}.dir();
+  light := rdr.Camera{};
+  light.look_at(l_dir,{0.,0,0},rdr.AXIS_Y);
+  light.ortho(-2400,2400,-2400,2400,-2000,400);
+  shadow_matrix := light.proj@*light.view;
 
   forward := {
     math.cos(pitch)*math.sin(yaw),
@@ -308,19 +339,32 @@ while (1){
 
   cam.look_at(eye,eye+forward,rdr.AXIS_Y);
 
+  frag.begin(shadow_material,map_shdw);
+  rdr.background(0.0);
+  light.begin();
+  for (i:=0; i<objs.length(); i++){
+    objs[i].mesh.draw(rdr.mat.id);
+  }
+  light.end();
+  frag.end();
+
+
   for (i:=0; i<objs.length(); i++){
     frag.begin(phong_material);
     cam.begin();
     frag.uniform("eye",eye);
-    frag.uniform("l_dir",{1.0,3.0,2.0}.dir());
+    frag.uniform("l_dir",l_dir);
     frag.uniform("l_col",{0.9,0.8,0.7});
-    frag.uniform("a_col",{0.2,0.2,0.2});
+    frag.uniform("a_col",{0.3,0.3,0.3});
 
     frag.uniform("Ka",objs[i].mtl.Ka);
     frag.uniform("Kd",objs[i].mtl.Kd);
     frag.uniform("Ks",objs[i].mtl.Ks);
     frag.uniform("Ke",objs[i].mtl.Ke);
     frag.uniform("Ns",objs[i].mtl.Ns);
+
+    frag.uniform("map_shdw",map_shdw);
+    frag.uniform("shadow_matrix",shadow_matrix);
 
     frag.uniform("has_map_Kd",  0);
     frag.uniform("has_map_Ks",  0);
