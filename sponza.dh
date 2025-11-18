@@ -13,8 +13,8 @@ include "std/rdr"
 include "std/img"
 include "std/win"
 
-W := 640
-H := 480
+W := 800
+H := 600
 
 context := win.init(W,H,win.CONTEXT_3D);
 frag.init(context);
