@@ -1118,6 +1118,10 @@ func sponza(m:i32,n:i32):list[Piece]{
   assembly2(pieces, rdr.mat.translate(n*20+40,27.5,m*20+40) @* rot180);
   assembly2(pieces, rdr.mat.translate(n*20+40,27.5,0) @* rot270);
 
+  pieces.sort(func(p:Piece):f32{
+    return p.matl as f32;
+  })
+
   return pieces;
 }
 
@@ -1751,196 +1755,207 @@ while (1){
   light.end();
   frag.end();
   
+
+  lmatl := -1;
+
   for (i := 0; i < pieces.length(); i++){
-    mt := (pieces[i].matl&MASK_MATL_TYP);
-    mv := (pieces[i].matl&MASK_MATL_VAR);
-    frag.begin(phong_material);
-    frag.uniform("map_noise",tex_noise);
-    frag.uniform("eye",eye);
-    frag.uniform("l_dir",l_dir);
-    frag.uniform("map_shadow",map_shadow);
-    frag.uniform("shadow_matrix",shadow_matrix);
+    if (lmatl != pieces[i].matl){
+      mt := (pieces[i].matl&MASK_MATL_TYP);
+      mv := (pieces[i].matl&MASK_MATL_VAR);
+      if (lmatl != -1){
+        cam.end();
+        frag.end();
+      }
+      if (mt == MATL_NONE){
+        frag.begin(uvdbg_material);
+      }else{
+        frag.begin(phong_material);
+      }
+      cam.begin();
 
-    if (mt == MATL_NONE){
-      frag.begin(uvdbg_material);
-    }else if (mt == MATL_BRIK){
-      frag.uniform("map_bump",tex_brick);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",10.0);
-      frag.uniform("bumpiness",0.02);
-      frag.uniform("tint0",{1.0,1.0,1.0});
-      frag.uniform("tint1",{0.5,0.5,0.5});
-      frag.uniform("col_ambi",{0.2,0.2,0.2});
-      frag.uniform("col_spec",{0.1,0.1,0.1});
-      frag.uniform("uv_scale",{0.1,0.1});
-      frag.uniform("uv_offset",{10.0,10.0});
-      frag.uniform("bump2diff",0.5);
-      frag.uniform("bump2ambi",0.5);
-      frag.uniform("noise_lvl",0);
-      frag.uniform("k_tint",0);
-
-    }else if (mt == MATL_TILE){
-      frag.uniform("map_bump",tex_tile);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",32.0);
-      frag.uniform("bumpiness",0.01);
-      frag.uniform("tint0",{0.5,0.5,0.5});
-      frag.uniform("tint1",{0.5,0.5,0.5});
-      frag.uniform("col_ambi",{0.2,0.2,0.2});
-      frag.uniform("col_spec",{0.2,0.2,0.2});
-      frag.uniform("uv_scale",{1.0/32,1.0/32});
-      frag.uniform("uv_offset",{0.0,0.0});
-      frag.uniform("bump2diff",0.1);
-      frag.uniform("bump2ambi",0.1);
-      frag.uniform("noise_lvl",0);
-      frag.uniform("k_tint",0.0);
-    }else if (mt == MATL_COL1){
-      frag.uniform("map_bump",tex_col1);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",20.0);
-      frag.uniform("bumpiness",0.02);
-      frag.uniform("tint0",{1.0,1.0,1.0});
-      frag.uniform("tint1",{0.5,0.5,0.5});
-      frag.uniform("col_ambi",{0.2,0.2,0.2});
-      frag.uniform("col_spec",{0.2,0.2,0.2});
-      frag.uniform("uv_scale",{1.0,1.0});
-      frag.uniform("uv_offset",{0.0,0.0});
-      frag.uniform("bump2diff",0.2);
-      frag.uniform("bump2ambi",0.2);
-      frag.uniform("noise_lvl",1);
-      frag.uniform("k_tint",0.8);
-    }else if (mt == MATL_ARCH){
-      frag.uniform("map_bump",tex_arch);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",10.0);
-      frag.uniform("bumpiness",0.01);
-      frag.uniform("tint0",{1.0,1.0,1.0});
-      frag.uniform("tint1",{0.5,0.5,0.5});
-      frag.uniform("col_ambi",{0.2,0.2,0.2});
-      frag.uniform("col_spec",{0.2,0.2,0.2});
-      frag.uniform("uv_scale",{0.5,(mv as f32)/10.0});
-      frag.uniform("uv_offset",{0.0,0.0});
-      frag.uniform("bump2diff",0.2);
-      frag.uniform("bump2ambi",0.2);
-      frag.uniform("noise_lvl",1);
-      frag.uniform("k_tint",0.8);
-    }else if (mt == MATL_COL2){
-      frag.uniform("map_bump",tex_col2);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",10.0);
-      frag.uniform("bumpiness",0.02);
-      frag.uniform("tint0",{1.0,1.0,1.0});
-      frag.uniform("tint1",{0.6,0.6,0.6});
-      frag.uniform("col_ambi",{0.2,0.2,0.2});
-      frag.uniform("col_spec",{0.2,0.2,0.2});
-      frag.uniform("uv_scale",{1.0,1.0});
-      frag.uniform("uv_offset",{0.0,0.0});
-      frag.uniform("bump2diff",0.2);
-      frag.uniform("bump2ambi",0.2);
-      frag.uniform("noise_lvl",1);
-      frag.uniform("k_tint",0.8);
-    }else if (mt == MATL_LEDG){
-      frag.uniform("map_bump",tex_ledge);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",10.0);
-      frag.uniform("bumpiness",0.02);
-      frag.uniform("tint0",{0.2,0.2,0.2});
-      frag.uniform("tint1",{0.1,0.1,0.1});
-      frag.uniform("col_ambi",{0.1,0.1,0.1});
-      frag.uniform("col_spec",{0.2,0.2,0.2});
-      frag.uniform("uv_scale",{1.0,1.0});
-      frag.uniform("uv_offset",{0.0,0.0});
-      frag.uniform("bump2diff",0.2);
-      frag.uniform("bump2ambi",0.2);
-      frag.uniform("noise_lvl",2);
-      frag.uniform("k_tint",0.8);
-    }else if (mt == MATL_CEIL){
-      frag.uniform("map_bump",tex_ceil);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",5.0);
-      frag.uniform("bumpiness",0.005);
-      frag.uniform("tint0",{0.9,0.9,0.9});
-      frag.uniform("tint1",{0.7,0.7,0.7});
-      frag.uniform("col_ambi",{0.15,0.15,0.15});
-      frag.uniform("col_spec",{0.2,0.2,0.2});
-      frag.uniform("uv_scale",{0.666,1.0});
-      frag.uniform("uv_offset",{0.0,0.0});
-      frag.uniform("bump2diff",0.2);
-      frag.uniform("bump2ambi",0.2);
-      frag.uniform("noise_lvl",1);
-      frag.uniform("k_tint",0.7);
-    }else if (mt == MATL_CAP1){
-      frag.uniform("map_bump",tex_slab);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",10.0);
-      frag.uniform("bumpiness",0.01);
-      frag.uniform("tint0",{0.9,0.9,0.9});
-      frag.uniform("tint1",{0.7,0.7,0.7});
-      frag.uniform("col_ambi",{0.15,0.15,0.15});
-      frag.uniform("col_spec",{0.2,0.2,0.2});
-      frag.uniform("uv_scale",{1.0,1.0});
-      frag.uniform("uv_offset",{0.0,0.0});
-      frag.uniform("bump2diff",0.2);
-      frag.uniform("bump2ambi",0.2);
-      frag.uniform("noise_lvl",1);
-      frag.uniform("k_tint",0.7);
-    }else if (mt == MATL_COL3){
-      frag.uniform("map_bump",tex_slab);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",10.0);
-      frag.uniform("bumpiness",0.01);
-      frag.uniform("tint0",{0.9,0.9,0.9});
-      frag.uniform("tint1",{0.7,0.7,0.7});
-      frag.uniform("col_ambi",{0.15,0.15,0.15});
-      frag.uniform("col_spec",{0.2,0.2,0.2});
-      frag.uniform("uv_scale",{1.0,2.0});
-      frag.uniform("uv_offset",{2.0,2.0});
-      frag.uniform("bump2diff",0.2);
-      frag.uniform("bump2ambi",0.2);
-      frag.uniform("noise_lvl",1);
-      frag.uniform("k_tint",0.7);
-    }else if (mt == MATL_VOLU){
-      frag.uniform("map_bump",tex_volute);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",10.0);
-      frag.uniform("bumpiness",0.01);
-      frag.uniform("tint0",{0.9,0.9,0.9});
-      frag.uniform("tint1",{0.7,0.7,0.7});
-      frag.uniform("col_ambi",{0.15,0.15,0.15});
-      frag.uniform("col_spec",{0.2,0.2,0.2});
-      frag.uniform("uv_scale",{1.0,1.0});
-      frag.uniform("uv_offset",{0.0,0.0});
-      frag.uniform("bump2diff",0.2);
-      frag.uniform("bump2ambi",0.2);
-      frag.uniform("noise_lvl",1);
-      frag.uniform("k_tint",0.7);
-    }else if (mt == MATL_ROOF){
-      frag.uniform("map_bump",tex_roof);
-      frag.uniform("map_ao",tex_blank);
-      frag.uniform("shininess",5.0);
-      frag.uniform("bumpiness",0.03);
-      frag.uniform("tint0",{0.2,0.2,0.2});
-      frag.uniform("tint1",{0.1,0.1,0.1});
-      frag.uniform("col_ambi",{0.1,0.1,0.1});
-      frag.uniform("col_spec",{0.2,0.2,0.2});
-      frag.uniform("uv_scale",{0.1,0.1});
-      frag.uniform("uv_offset",{10.0,10.0});
-      frag.uniform("bump2diff",0.0);
-      frag.uniform("bump2ambi",0.0);
-      frag.uniform("noise_lvl",0);
-      frag.uniform("k_tint",0.5);
-    }else{
-      frag.begin(uvdbg_material);
+      frag.uniform("map_noise",tex_noise);
+      frag.uniform("eye",eye);
+      frag.uniform("l_dir",l_dir);
+      frag.uniform("map_shadow",map_shadow);
+      frag.uniform("shadow_matrix",shadow_matrix);
+      
+      if (mt == MATL_BRIK){
+        frag.uniform("map_bump",tex_brick);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.02);
+        frag.uniform("tint0",{1.0,1.0,1.0});
+        frag.uniform("tint1",{0.5,0.5,0.5});
+        frag.uniform("col_ambi",{0.2,0.2,0.2});
+        frag.uniform("col_spec",{0.1,0.1,0.1});
+        frag.uniform("uv_scale",{0.1,0.1});
+        frag.uniform("uv_offset",{10.0,10.0});
+        frag.uniform("bump2diff",0.5);
+        frag.uniform("bump2ambi",0.5);
+        frag.uniform("noise_lvl",0);
+        frag.uniform("k_tint",0);
+      }else if (mt == MATL_TILE){
+        frag.uniform("map_bump",tex_tile);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",32.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{0.5,0.5,0.5});
+        frag.uniform("tint1",{0.5,0.5,0.5});
+        frag.uniform("col_ambi",{0.2,0.2,0.2});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0/32,1.0/32});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.1);
+        frag.uniform("bump2ambi",0.1);
+        frag.uniform("noise_lvl",0);
+        frag.uniform("k_tint",0.0);
+      }else if (mt == MATL_COL1){
+        frag.uniform("map_bump",tex_col1);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",20.0);
+        frag.uniform("bumpiness",0.02);
+        frag.uniform("tint0",{1.0,1.0,1.0});
+        frag.uniform("tint1",{0.5,0.5,0.5});
+        frag.uniform("col_ambi",{0.2,0.2,0.2});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("bump2ambi",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.8);
+      }else if (mt == MATL_ARCH){
+        frag.uniform("map_bump",tex_arch);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{1.0,1.0,1.0});
+        frag.uniform("tint1",{0.5,0.5,0.5});
+        frag.uniform("col_ambi",{0.2,0.2,0.2});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{0.5,(mv as f32)/10.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("bump2ambi",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.8);
+      }else if (mt == MATL_COL2){
+        frag.uniform("map_bump",tex_col2);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.02);
+        frag.uniform("tint0",{1.0,1.0,1.0});
+        frag.uniform("tint1",{0.6,0.6,0.6});
+        frag.uniform("col_ambi",{0.2,0.2,0.2});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("bump2ambi",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.8);
+      }else if (mt == MATL_LEDG){
+        frag.uniform("map_bump",tex_ledge);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.02);
+        frag.uniform("tint0",{0.2,0.2,0.2});
+        frag.uniform("tint1",{0.1,0.1,0.1});
+        frag.uniform("col_ambi",{0.1,0.1,0.1});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("bump2ambi",0.2);
+        frag.uniform("noise_lvl",2);
+        frag.uniform("k_tint",0.8);
+      }else if (mt == MATL_CEIL){
+        frag.uniform("map_bump",tex_ceil);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",5.0);
+        frag.uniform("bumpiness",0.005);
+        frag.uniform("tint0",{0.9,0.9,0.9});
+        frag.uniform("tint1",{0.7,0.7,0.7});
+        frag.uniform("col_ambi",{0.15,0.15,0.15});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{0.666,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("bump2ambi",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.7);
+      }else if (mt == MATL_CAP1){
+        frag.uniform("map_bump",tex_slab);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{0.9,0.9,0.9});
+        frag.uniform("tint1",{0.7,0.7,0.7});
+        frag.uniform("col_ambi",{0.15,0.15,0.15});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("bump2ambi",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.7);
+      }else if (mt == MATL_COL3){
+        frag.uniform("map_bump",tex_slab);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{0.9,0.9,0.9});
+        frag.uniform("tint1",{0.7,0.7,0.7});
+        frag.uniform("col_ambi",{0.15,0.15,0.15});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,2.0});
+        frag.uniform("uv_offset",{2.0,2.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("bump2ambi",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.7);
+      }else if (mt == MATL_VOLU){
+        frag.uniform("map_bump",tex_volute);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{0.9,0.9,0.9});
+        frag.uniform("tint1",{0.7,0.7,0.7});
+        frag.uniform("col_ambi",{0.15,0.15,0.15});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("bump2ambi",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.7);
+      }else if (mt == MATL_ROOF){
+        frag.uniform("map_bump",tex_roof);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",5.0);
+        frag.uniform("bumpiness",0.03);
+        frag.uniform("tint0",{0.2,0.2,0.2});
+        frag.uniform("tint1",{0.1,0.1,0.1});
+        frag.uniform("col_ambi",{0.1,0.1,0.1});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{0.1,0.1});
+        frag.uniform("uv_offset",{10.0,10.0});
+        frag.uniform("bump2diff",0.0);
+        frag.uniform("bump2ambi",0.0);
+        frag.uniform("noise_lvl",0);
+        frag.uniform("k_tint",0.5);
+      }
     }
-    // frag.begin(modelling_material);
-    // frag.uniform("l_dir",l_dir);
-    cam.begin();
+    
     pieces[i].mesh.draw(pieces[i].trfm);
+
+    lmatl = pieces[i].matl;
+  }
+
+  if (lmatl != -1){
     cam.end();
     frag.end();
   }
-
-
 
   if (keys_held['w']){
     vel += forward*spd;
