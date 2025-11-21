@@ -9,6 +9,23 @@ include "std/frag"
 include "std/rdr"
 include "std/win"
 include "std/time"
+include "std/rand"
+include "std/img"
+
+MASK_MATL_TYP  := 0xf0
+MASK_MATL_VAR  := 0x0f
+MATL_NONE      := 0
+MATL_ARCH      := (1<<4)
+MATL_COL2      := (2<<4)
+MATL_COL1      := (3<<4)
+MATL_TILE      := (4<<4)
+MATL_BRIK      := (5<<4)
+MATL_LEDG      := (6<<4)
+MATL_CEIL      := (7<<4)
+MATL_CAP1      := (8<<4)
+MATL_COL3      := (9<<4)
+MATL_VOLU      := (10<<4)
+MATL_ROOF      := (11<<4)
 
 typedef Piece = {
   mesh: rdr.Mesh;
@@ -35,9 +52,24 @@ func add_face(mesh:rdr.Mesh,face:list[vec[f32,3]]){
     mesh.normals.push(nml);
     mesh.normals.push(nml);
     mesh.normals.push(nml);
+    an := math.abs(nml);
+    if (an.z > an.x && an.z > an.y){
+      mesh.uvs.push(a.xy);
+      mesh.uvs.push(b.xy);
+      mesh.uvs.push(c.xy);
+    }else if (an.y > an.x && an.y > an.z){
+      mesh.uvs.push(a.xz);
+      mesh.uvs.push(b.xz);
+      mesh.uvs.push(c.xz);
+    }else{
+      mesh.uvs.push(a.zy);
+      mesh.uvs.push(b.zy);
+      mesh.uvs.push(c.zy);
+    }
   }
 }
 func add_backface(mesh:rdr.Mesh,face:list[vec[f32,3]],dep:vec[f32,3]){
+  an := math.abs(dep);
   for (i := 1; i < face.length()-1; i++){
     a := face[0]+dep;
     b := face[i]+dep;
@@ -49,6 +81,19 @@ func add_backface(mesh:rdr.Mesh,face:list[vec[f32,3]],dep:vec[f32,3]){
     mesh.normals.push(nml);
     mesh.normals.push(nml);
     mesh.normals.push(nml);
+    if (an.z > an.x && an.z > an.y){
+      mesh.uvs.push(a.xy);
+      mesh.uvs.push(c.xy);
+      mesh.uvs.push(b.xy);
+    }else if (an.y > an.x && an.y > an.z){
+      mesh.uvs.push(a.xz);
+      mesh.uvs.push(c.xz);
+      mesh.uvs.push(b.xz);
+    }else{
+      mesh.uvs.push(a.zy);
+      mesh.uvs.push(c.zy);
+      mesh.uvs.push(b.zy);
+    }
   }
 }
 func add_extrusion(mesh:rdr.Mesh,face:list[vec[f32,3]],dep:vec[f32,3]){
@@ -67,10 +112,20 @@ func add_extrusion(mesh:rdr.Mesh,face:list[vec[f32,3]],dep:vec[f32,3]){
     for (j:=0;j<6;j++){
       mesh.normals.push(nml);
     }
+    t0 := (i as f32)/face.length();
+    t1 := ((i+1) as f32)/face.length();
+    mesh.uvs.push({1,t0});
+    mesh.uvs.push({1,t1});
+    mesh.uvs.push({0,t0});
+    mesh.uvs.push({0,t0});
+    mesh.uvs.push({1,t1});
+    mesh.uvs.push({0,t1});
   }
 }
 func add_tube(mesh:rdr.Mesh,faces:list[list[vec[f32,3]]]){
   for (i := 0; i < faces.length()-1; i++){
+    t0 := (i as f32)/(faces.length()-1);
+    t1 := ((i+1) as f32)/(faces.length()-1);
     for (j := 0; j < faces[i].length(); j++){
       j1 := (j+1)%faces[i].length();
       a := faces[i][j];
@@ -87,9 +142,55 @@ func add_tube(mesh:rdr.Mesh,faces:list[list[vec[f32,3]]]){
       for (k:=0;k<6;k++){
         mesh.normals.push(nml);
       }
+      s0 := (j as f32)/faces[i].length();
+      s1 := ((j+1) as f32)/faces[i].length();
+      mesh.uvs.push({s0,t0});
+      mesh.uvs.push({s1,t0});
+      mesh.uvs.push({s0,t1});
+      mesh.uvs.push({s1,t0});
+      mesh.uvs.push({s1,t1});
+      mesh.uvs.push({s0,t1});
     }
   }
 }
+func smooth_tube_lat(mesh:rdr.Mesh,m:i32,n:i32){
+  for (i := 0; i < n-1; i++){
+    for (j := 0; j < m; j++){
+      j1 := (j+1)%m;
+      b0 := mesh.normals[(i*m+j)*6+1];
+      d0 := mesh.normals[(i*m+j)*6+4];
+      a1 := mesh.normals[(i*m+j1)*6+0];
+      c1 := mesh.normals[(i*m+j1)*6+2];
+      ab := (b0+a1)*0.5;
+      cd := (d0+c1)*0.5;
+      mesh.normals[(i*m+j)*6+1] = ab;
+      mesh.normals[(i*m+j)*6+3] = ab;
+      mesh.normals[(i*m+j)*6+4] = cd;
+      mesh.normals[(i*m+j1)*6+0] = ab;
+      mesh.normals[(i*m+j1)*6+2] = cd;
+      mesh.normals[(i*m+j1)*6+5] = cd;
+    }
+  }
+}
+func smooth_tube_lon(mesh:rdr.Mesh,m:i32,n:i32){
+  for (i := 0; i < n-2; i++){
+    for (j := 0; j < m; j++){
+      c0 := mesh.normals[(i*m+j)*6+2];
+      d0 := mesh.normals[(i*m+j)*6+4];
+      a1 := mesh.normals[((i+1)*m+j)*6+0];
+      b1 := mesh.normals[((i+1)*m+j)*6+1];
+      ac := (c0+a1)*0.5;
+      bd := (d0+b1)*0.5;
+      mesh.normals[(i*m+j)*6+2] = ac;
+      mesh.normals[(i*m+j)*6+4] = bd;
+      mesh.normals[(i*m+j)*6+5] = ac;
+      mesh.normals[((i+1)*m+j)*6+0] = ac;
+      mesh.normals[((i+1)*m+j)*6+1] = bd;
+      mesh.normals[((i+1)*m+j)*6+3] = bd;
+    }
+  }
+}
+
 func add_vase(mesh:rdr.Mesh,prof:list[vec[f32,3]],n:i32,phase:f32){
   faces := list[list[vec[f32,3]]]{};
   for (i := 0; i < prof.length(); i++){
@@ -124,7 +225,7 @@ func arch1():rdr.Mesh{
   }
   f0.push({10,0.,2.0});
   add_face(mesh,f0);
-  add_extrusion(mesh,f0,{0.,0.,-4.});
+  // add_extrusion(mesh,f0,{0.,0.,-4.});
   add_backface(mesh,f0,{0.,0.,-4.});
   return mesh;
 }
@@ -156,7 +257,7 @@ func arch1_edge():rdr.Mesh{
 func ceil1():rdr.Mesh{
   mesh := rdr.Mesh{};
   ff := list[list[vec[f32,3]]]{};
-  n := 10;
+  n := 11;
   for (i := 0; i < n; i++){
     a := i/((n-1) as f32) * math.PI/2;
     fi := list[vec[f32,3]]{
@@ -167,13 +268,14 @@ func ceil1():rdr.Mesh{
     ff.push(fi);
   }
   add_tube(mesh,ff);
+  smooth_tube_lon(mesh,3,n);
   return mesh;
 }
 
 func ceil1_corner():rdr.Mesh{
   mesh := rdr.Mesh{};
   ff := list[list[vec[f32,3]]]{};
-  n := 10;
+  n := 11;
   for (i := 0; i < n; i++){
     a := i/((n-1) as f32) * math.PI/2;
     fi := list[vec[f32,3]]{
@@ -184,6 +286,7 @@ func ceil1_corner():rdr.Mesh{
     ff.push(fi);
   }
   add_tube(mesh,ff);
+  smooth_tube_lon(mesh,3,n);
   return mesh;
 }
 
@@ -217,6 +320,12 @@ func col1():rdr.Mesh{
     {2.,-12.,0.},
   }
   add_vase(mesh,prof,8,22.5);
+  for (i := 0; i < mesh.uvs.length(); i++){
+    mesh.uvs[i] = {
+      mesh.uvs[i].x,
+      1.0-mesh.vertices[i].y/-12.0
+    };
+  }
   return mesh;
 }
 
@@ -238,7 +347,7 @@ func arch2(w:f32):rdr.Mesh{
   }
   f0.push({w,0.,2});
   add_face(mesh,f0);
-  add_extrusion(mesh,f0,{0.,0.,-4.});
+  // add_extrusion(mesh,f0,{0.,0.,-4.});
   add_backface(mesh,f0,{0.,0.,-4.});
   return mesh;
 }
@@ -288,11 +397,17 @@ func col2():rdr.Mesh{
     {1.75,-2.75,0.},
     {1.5,-3.0,0.},
     {1.5,-11.0,0.},
-    {2.0,-11.5,0.},
-    {2.0,-12,0.},
+    {2.25,-11.5,0.},
+    {2.25,-12,0.},
   }
   for (i := 0; i < prof.length(); i++) prof[i] = prof[i].xyx;
   add_vase(mesh,prof,4,0.);
+  for (i := 0; i < mesh.uvs.length(); i++){
+    mesh.uvs[i] = {
+      mesh.uvs[i].x,
+      1.0-mesh.vertices[i].y/-12.0
+    };
+  }
   return mesh;
 }
 
@@ -304,6 +419,20 @@ func col3_cap():rdr.Mesh{
   add_face(mesh,f0);
   add_extrusion(mesh,f0,{0.,-0.5,0});
   add_backface(mesh,f0,{0.,-0.5,0});
+  prof := list[vec[f32,3]]{
+    {0.25,-11.0,0.},
+    {1.25,-11.0,0.},
+    {1.75,-11.5,0.},
+    {2.0,-11.5,0.},
+    {2.0,-12,0.},
+  }
+  for (i := 0; i < prof.length(); i++) prof[i] = prof[i].xyx;
+  add_vase(mesh,prof,4,0.);
+  return mesh;
+}
+
+func col3_volute():rdr.Mesh{
+  mesh := rdr.Mesh{};
   f1 := list[vec[f32,3]]{
     {0.,-0.5,0.25},{0.0,-2.0,0.25},{1.0,-2.0,0.25},
     {1.25,-1.75,0.25}, {1.5,-1.75,0.25}, {1.75,-1.5,0.25}, {1.75,-1.25,0.25},
@@ -319,19 +448,24 @@ func col3_cap():rdr.Mesh{
     }
     extw := (mat @* {0.,0,-0.5,1.0}).xyzw;
     ext := extw.xyz/extw.w;
+    idx0 := mesh.uvs.length();
     add_face(mesh,fi);
-    add_extrusion(mesh,fi,ext);
     add_backface(mesh,fi,ext);
+    for (j := idx0; j < mesh.uvs.length(); j++){
+      mesh.uvs[j] = {
+        math.abs(mesh.uvs[j].x)/2.0*0.5,
+        (mesh.uvs[j].y+2.0)/1.5,
+      }
+    }
+    idx0 = mesh.uvs.length();
+    add_extrusion(mesh,fi,ext);
+    for (j := idx0; j < mesh.uvs.length(); j++){
+      mesh.uvs[j] = {
+        mesh.uvs[j].x*0.5+0.5,
+        mesh.uvs[j].y,
+      }
+    }
   }
-  prof := list[vec[f32,3]]{
-    {0.25,-11.0,0.},
-    {1.25,-11.0,0.},
-    {1.75,-11.5,0.},
-    {2.0,-11.5,0.},
-    {2.0,-12,0.},
-  }
-  for (i := 0; i < prof.length(); i++) prof[i] = prof[i].xyx;
-  add_vase(mesh,prof,4,0.);
   return mesh;
 }
 
@@ -355,6 +489,14 @@ func col3():rdr.Mesh{
   }
   for (i := 0; i < prof.length(); i++) prof[i] = prof[i].xyx;
   add_vase(mesh,prof,14,0.);
+  for (i := 0; i < mesh.uvs.length(); i++){
+    mesh.uvs[i] = {
+      mesh.uvs[i].x,
+      1.0-mesh.vertices[i].y/-10.5
+    };
+  }
+  smooth_tube_lon(mesh,14,prof.length());
+  smooth_tube_lat(mesh,14,prof.length());
   return mesh;
 }
 
@@ -466,18 +608,41 @@ func arch3_edge1():rdr.Mesh{
   return mesh;
 }
 
-func arch3_ledge():rdr.Mesh{
+func ledge1(end:i32):rdr.Mesh{
   mesh := rdr.Mesh{};
   f0 := list[vec[f32,3]]{
-    {10.0,0,3.5},
-    {10.0,-0.5,3.5},
-    {10.0,-1.0,3},
-    {10.0,-1.0,-3},
-    {10.0,0.0,-3}
+    {0.0,0,3.5},
+    {0.0,-0.5,3.5},
+    {0.0,-1.0,3},
+    {0.0,-1.0,-2.5},
+    {0.0,0.0,-2.5}
   }
-  add_face(mesh,f0);
-  add_extrusion(mesh,f0,{-20.,0,0});
-  add_backface(mesh,f0,{-20.,0,0});
+  ff := list[list[vec[f32,3]]]{};
+  mat0 : vec[f32,4,4];
+  mat1 : vec[f32,4,4];
+  if (end&2){
+    mat0 = rdr.mat.translate(10,0,0) @* rdr.mat.rotate_deg(rdr.AXIS_Y, -45) @* rdr.mat.scale(1,1,1.414);
+  }else{
+    mat0 = rdr.mat.translate(10,0,0)
+  }
+  if (end&1){
+    mat1 = rdr.mat.translate(-10,0,0) @* rdr.mat.rotate_deg(rdr.AXIS_Y,45) @* rdr.mat.scale(1,1,1.414);
+  }else{
+    mat1 = rdr.mat.translate(-10,0,0)
+  }
+  f1 := list[vec[f32,3]]{};
+  for (j:=0; j<f0.length(); j++){
+    v := (mat0 @* {...f0[j],1.}).xyzw;
+    f1.push(v.xyz/v.w);
+  }
+  f2 := list[vec[f32,3]]{};
+  for (j:=0; j<f0.length(); j++){
+    v := (mat1 @* {...f0[j],1.}).xyzw;
+    f2.push(v.xyz/v.w);
+  }
+  ff.push(f1);
+  ff.push(f2);
+  add_tube(mesh,ff);
   return mesh;
 }
 
@@ -533,9 +698,9 @@ func roof1(m:i32,n:i32):rdr.Mesh{
   mesh := rdr.Mesh{};
   ff := list[list[vec[f32,3]]]{}
   f0 := list[vec[f32,3]]{
-    {0,0,33.5},{0,1,33.5},{0,10,0},{0,0,0},
+    {0,0,23.5},{0,1,23.5},{0,10,-4.},{0,0,-4.},
   };
-  scl := rdr.mat.scale(1.414,1.,1.);;
+  scl := rdr.mat.scale(1,1.,1.414);
   mat1 := rdr.mat.translate(0,0,0) @* rdr.mat.rotate_deg(rdr.AXIS_Y, 45) @* scl;
   mat2 := rdr.mat.translate((n+2)*20,0,0) @* rdr.mat.rotate_deg(rdr.AXIS_Y, -45) @* scl;
   mat3 := rdr.mat.translate((n+2)*20,0,(m+2)*20) @* rdr.mat.rotate_deg(rdr.AXIS_Y, -135) @* scl;
@@ -567,8 +732,51 @@ func roof1(m:i32,n:i32):rdr.Mesh{
   ff.push(f3);
   ff.push(f4);
   ff.push(f1);
-  
+
   add_tube(mesh,ff);
+
+  for (i := 0; i < mesh.uvs.length(); i++){
+    ab := (i % 12) >= 6;
+    cd := (i % 48) < 24;
+    if (cd){
+      if (ab){
+        mesh.uvs[i] = mesh.vertices[i].xz;
+      }else{
+        mesh.uvs[i] = mesh.vertices[i].xy;
+      }
+    }else{
+      if (ab){
+        mesh.uvs[i] = mesh.vertices[i].zx;
+      }else{
+        mesh.uvs[i] = mesh.vertices[i].zy;
+      }
+    }
+  }
+  return mesh;
+}
+
+func wall1(m:i32,n:i32):rdr.Mesh{
+  h := 78.5;
+  mesh := rdr.Mesh{};
+  f0 := list[vec[f32,3]]{
+    {0.,h,0.0},
+    {0.,0.,0.0},
+    {(n+2)*20,0.,0.0},
+    {(n+2)*20.,h,0.0},
+  }
+  f1 := list[vec[f32,3]]{
+    {0.,0.,0.0},
+    {0.,h,0.0},
+    {0,h,(m+2)*20},
+    {0.,0.,(m+2)*20},
+  };
+  add_face(mesh, f0);
+  add_extrusion(mesh, f0, {0.,0.,-4.});
+  add_backface(mesh, f0, {0.,0.,-4.});
+
+  add_face(mesh, f1);
+  add_extrusion(mesh, f1, {-4,0.,0});
+  add_backface(mesh, f1, {-4,0.,0});
   return mesh;
 }
 
@@ -596,164 +804,196 @@ mesh_arch2b := arch2(4.5);
 mesh_arch2_edge := arch2_edge();
 mesh_col2 := col2();
 mesh_col3_cap := col3_cap();
+mesh_col3_volute := col3_volute();
 mesh_col3 := col3();
 mesh_arch3a := arch3a();
 mesh_arch3b := arch3b();
 mesh_arch3_edge1 := arch3_edge1();
 mesh_arch3_edge2 := arch3_edge2();
-mesh_arch3_ledge := arch3_ledge();
+mesh_ledge1a := ledge1(0);
+mesh_ledge1b := ledge1(1);
+mesh_ledge1c := ledge1(2);
+mesh_ledge1d := ledge1(3);
 mesh_arch1_corner := arch1_corner();
 
-func assembly1(pieces:list[Piece], trfm:vec[f32,4,4]){
+func assembly1(pieces:list[Piece], trfm:vec[f32,4,4], end:i32){
   pieces.push(Piece{
-    mesh: mesh_arch1,
+    mesh: mesh_arch1, matl:MATL_BRIK,
     trfm: trfm @* rdr.mat.translate(10,14.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_arch1,
+    mesh: mesh_arch1, matl:MATL_BRIK,
     trfm: trfm @* rdr.mat.translate(10,14.5,20.) @* rdr.mat.scale(-1.,1,1)
   })
   pieces.push(Piece{
-    mesh: mesh_arch1_edge,
+    mesh: mesh_arch1_edge, matl:(MATL_ARCH|9),
     trfm: trfm @* rdr.mat.translate(10,14.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1,
+    mesh: mesh_ceil1, matl:MATL_CEIL,
     trfm: trfm @* rdr.mat.translate(10,14.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1,
+    mesh: mesh_ceil1, matl:MATL_CEIL,
     trfm: trfm @* rdr.mat.translate(10,14.5,20.) @* rdr.mat.scale(-1.,1,1)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1,
+    mesh: mesh_ceil1, matl:MATL_CEIL,
     trfm: trfm @* rdr.mat.translate(10,14.5,-1.5) @* rdr.mat.scale(1.,1,-1)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1,
+    mesh: mesh_ceil1, matl:MATL_CEIL,
     trfm: trfm @* rdr.mat.translate(10,14.5,-1.5) @* rdr.mat.scale(-1.,1,-1)
   })
   pieces.push(Piece{
-    mesh: mesh_col1_cap,
+    mesh: mesh_col1_cap, matl:MATL_CAP1,
     trfm: trfm @* rdr.mat.translate(0.,14.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_col1_cap,
+    mesh: mesh_col1_cap, matl:MATL_CAP1,
     trfm: trfm @* rdr.mat.translate(0.,14.5,-1.0)
   })
   pieces.push(Piece{
-    mesh: mesh_col1,
+    mesh: mesh_col1, matl:MATL_COL1,
     trfm: trfm @* rdr.mat.translate(0.,12.0,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_arch2b,
-    trfm: trfm @* rdr.mat.translate(5.5,41.5,20.)
+    mesh: mesh_arch2b, matl:MATL_BRIK,
+    trfm: trfm @* rdr.mat.translate(5.5,42.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_arch2a,
-    trfm: trfm @* rdr.mat.translate(5.5,41.5,20.) @* rdr.mat.scale(-1.,1,1)
+    mesh: mesh_arch2a, matl:MATL_BRIK,
+    trfm: trfm @* rdr.mat.translate(5.5,42.5,20.) @* rdr.mat.scale(-1.,1,1)
   })
   pieces.push(Piece{
-    mesh: mesh_arch2a,
-    trfm: trfm @* rdr.mat.translate(14.5,41.5,20.)
+    mesh: mesh_arch2a, matl:MATL_BRIK,
+    trfm: trfm @* rdr.mat.translate(14.5,42.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_arch2b,
-    trfm: trfm @* rdr.mat.translate(14.5,41.5,20.) @* rdr.mat.scale(-1.,1,1)
+    mesh: mesh_arch2b, matl:MATL_BRIK,
+    trfm: trfm @* rdr.mat.translate(14.5,42.5,20.) @* rdr.mat.scale(-1.,1,1)
   })
   pieces.push(Piece{
-    mesh: mesh_arch2_edge,
-    trfm: trfm @* rdr.mat.translate(5.5,41.5,20.)
+    mesh: mesh_arch2_edge, matl:(MATL_ARCH|10),
+    trfm: trfm @* rdr.mat.translate(5.5,42.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_arch2_edge,
-    trfm: trfm @* rdr.mat.translate(14.5,41.5,20.)
+    mesh: mesh_arch2_edge, matl:(MATL_ARCH|10),
+    trfm: trfm @* rdr.mat.translate(14.5,42.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_col2,
-    trfm: trfm @* rdr.mat.translate(0.,41.5,20.)
+    mesh: mesh_col2, matl:MATL_COL2,
+    trfm: trfm @* rdr.mat.translate(0.,42.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_col3_cap,
-    trfm: trfm @* rdr.mat.translate(10.,41.5,20.)
+    mesh: mesh_col3_cap, matl: MATL_CAP1,
+    trfm: trfm @* rdr.mat.translate(10.,42.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_col3,
-    trfm: trfm @* rdr.mat.translate(10.,41,20.)
+    mesh: mesh_col3_volute, matl: MATL_VOLU,
+    trfm: trfm @* rdr.mat.translate(10.,42.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1,
-    trfm: trfm @* rdr.mat.translate(10,41,20.)
+    mesh: mesh_col3, matl: MATL_COL3,
+    trfm: trfm @* rdr.mat.translate(10.,42,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1,
-    trfm: trfm @* rdr.mat.translate(10,41,20.) @* rdr.mat.scale(-1.,1,1)
+    mesh: mesh_ceil1, matl:MATL_CEIL,
+    trfm: trfm @* rdr.mat.translate(10,42,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1,
-    trfm: trfm @* rdr.mat.translate(10,41,-1.5) @* rdr.mat.scale(1.,1,-1)
+    mesh: mesh_ceil1, matl:MATL_CEIL,
+    trfm: trfm @* rdr.mat.translate(10,42,20.) @* rdr.mat.scale(-1.,1,1)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1,
-    trfm: trfm @* rdr.mat.translate(10,41,-1.5) @* rdr.mat.scale(-1.,1,-1)
+    mesh: mesh_ceil1, matl:MATL_CEIL,
+    trfm: trfm @* rdr.mat.translate(10,42,-1.5) @* rdr.mat.scale(1.,1,-1)
   })
   pieces.push(Piece{
-    mesh: mesh_col1_cap,
-    trfm: trfm @* rdr.mat.translate(0.,41,-1.0)
+    mesh: mesh_ceil1, matl:MATL_CEIL,
+    trfm: trfm @* rdr.mat.translate(10,42,-1.5) @* rdr.mat.scale(-1.,1,-1)
+  })
+  pieces.push(Piece{
+    mesh: mesh_col1_cap, matl:MATL_CAP1,
+    trfm: trfm @* rdr.mat.translate(0.,42,-1.0)
+  })
+  mesh_ledge : rdr.Mesh;
+  if (end == 0){
+    mesh_ledge = mesh_ledge1a;
+  }else if (end == 1){
+    mesh_ledge = mesh_ledge1b;
+  }else if (end == 2){
+    mesh_ledge = mesh_ledge1c;
+  }else{
+    mesh_ledge = mesh_ledge1d;
+  }
+  pieces.push(Piece{
+    mesh: mesh_ledge, matl:MATL_LEDG,
+    trfm: trfm @* rdr.mat.translate(10,30.5,20.)
   })
 }
 
 func assembly2(pieces:list[Piece], trfm:vec[f32,4,4]){
   pieces.push(Piece{
-    mesh: mesh_ceil1_corner,
+    mesh: mesh_ceil1_corner, matl:MATL_CEIL,
     trfm: trfm @* rdr.mat.translate(10,14.5,20.)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1_corner,
+    mesh: mesh_ceil1_corner, matl:MATL_CEIL,
     trfm: trfm @* rdr.mat.translate(8.5,14.5,20.) @* rdr.mat.scale(-1.,1,1)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1_corner,
+    mesh: mesh_ceil1_corner, matl:MATL_CEIL,
     trfm: trfm @* rdr.mat.translate(10,14.5,-1.5) @* rdr.mat.scale(1.,1,-1)
   })
   pieces.push(Piece{
-    mesh: mesh_ceil1_corner,
+    mesh: mesh_ceil1_corner, matl:MATL_CEIL,
     trfm: trfm @* rdr.mat.translate(8.5,14.5,-1.5) @* rdr.mat.scale(-1.,1,-1)
   })
   pieces.push(Piece{
-    mesh: mesh_col1_cap,
+    mesh: mesh_col1_cap, matl:MATL_CAP1,
     trfm: trfm @* rdr.mat.translate(-1.0,14.5,-1.0)
   })
   pieces.push(Piece{
-    mesh: mesh_col1_cap,
+    mesh: mesh_col1_cap, matl:MATL_CAP1,
     trfm: trfm @* rdr.mat.translate(-1.0,14.5,19.625)
   })
   pieces.push(Piece{
-    mesh: mesh_arch1_corner,
+    mesh: mesh_arch1_corner, matl:MATL_BRIK,
     trfm: trfm @* rdr.mat.translate(20,14.5,20)
   })
 }
 
 func assembly3(pieces:list[Piece], trfm:vec[f32,4,4], end:i32){
   pieces.push(Piece{
-    mesh: (end&2)?mesh_arch3b:mesh_arch3a,
+    mesh: (end&2)?mesh_arch3b:mesh_arch3a, matl:MATL_BRIK,
     trfm: trfm @* rdr.mat.translate(10,0.,20.)
   })
   pieces.push(Piece{
-    mesh: (end&1)?mesh_arch3b:mesh_arch3a,
+    mesh: (end&1)?mesh_arch3b:mesh_arch3a, matl:MATL_BRIK,
     trfm: trfm @* rdr.mat.translate(10,0.,20.) @* rdr.mat.scale(-1.,1,1)
   })
   pieces.push(Piece{
-    mesh: mesh_arch3_edge1,
+    mesh: mesh_arch3_edge1, matl:(MATL_ARCH|3),
     trfm: trfm @* rdr.mat.translate(10,0.,20.)
   })
+  mesh_ledge : rdr.Mesh;
+  if (end == 0){
+    mesh_ledge = mesh_ledge1a;
+  }else if (end == 1){
+    mesh_ledge = mesh_ledge1b;
+  }else if (end == 2){
+    mesh_ledge = mesh_ledge1c;
+  }else{
+    mesh_ledge = mesh_ledge1d;
+  }
   pieces.push(Piece{
-    mesh: mesh_arch3_ledge,
+    mesh: mesh_ledge,  matl:MATL_LEDG,
     trfm: trfm @* rdr.mat.translate(10,0.,20.)
   })
   if (!(end&1)){
     pieces.push(Piece{
-      mesh: mesh_arch3_edge2,
+      mesh: mesh_arch3_edge2, matl:(MATL_ARCH|7),
       trfm: trfm @* rdr.mat.translate(0,15.,20.)
     })
   }
@@ -763,37 +1003,25 @@ func assembly3(pieces:list[Piece], trfm:vec[f32,4,4], end:i32){
 
 func sponza(m:i32,n:i32):list[Piece]{
   pieces := list[Piece]{};
-  wall1 := rdr.Mesh{};
-  h := 77.5;
-  add_face(wall1, list[vec[f32,3]]{
-    {0.,h,0.0},
-    {0.,0.,0.0},
-    {(n+2)*20,0.,0.0},
-    {(n+2)*20.,h,0.0},
-  });
-  wall2 := rdr.Mesh{};
-  add_face(wall2, list[vec[f32,3]]{
-    {0.,0.,0.0},
-    {0.,h,0.0},
-    {0,h,(m+2)*20},
-    {0.,0.,(m+2)*20},
-  });
-  floor1 := rdr.Mesh{};
-  add_face(floor1, list[vec[f32,3]]{
+  h := 78.5;
+
+  mesh_wall1 := wall1(m,n);
+  mesh_floor1 := rdr.Mesh{};
+  add_face(mesh_floor1, list[vec[f32,3]]{
     {0.,0.,0.},
     {0.,0.,(m+2)*20},
     {(n+2)*20,0.,(m+2)*20},
     {(n+2)*20,0.,0.},
   });
-  floor2a := rdr.Mesh{};
-  add_face(floor2a, list[vec[f32,3]]{
+  mesh_floor2a := rdr.Mesh{};
+  add_face(mesh_floor2a, list[vec[f32,3]]{
     {0.,24.5,0.},
     {0.,24.5,20},
     {(n+2)*20,24.5,20},
     {(n+2)*20,24.5,0.},
   });
-  floor2b := rdr.Mesh{};
-  add_face(floor2b, list[vec[f32,3]]{
+  mesh_floor2b := rdr.Mesh{};
+  add_face(mesh_floor2b, list[vec[f32,3]]{
     {0.,24.5,20.},
     {0.,24.5,(m+1)*20},
     {20,24.5,(m+1)*20},
@@ -805,80 +1033,77 @@ func sponza(m:i32,n:i32):list[Piece]{
   rot270 := rdr.mat.rotate_deg(rdr.AXIS_Y, 270);
 
   pieces.push(Piece{
-    mesh: wall1,
+    mesh: mesh_wall1, matl:MATL_BRIK,
     trfm: rdr.mat.translate(0.,0.,0.)
   })
+
   pieces.push(Piece{
-    mesh: wall2,
-    trfm: rdr.mat.translate(0.,0.,0.)
-  })
-  pieces.push(Piece{
-    mesh: wall1,
-    trfm: rdr.mat.translate(n*20+40,0.,m*20+40) @* rot180
-  })
-  pieces.push(Piece{
-    mesh: wall2,
+    mesh: mesh_wall1, matl:MATL_BRIK,
     trfm: rdr.mat.translate(n*20+40,0.,m*20+40) @* rot180
   })
 
   pieces.push(Piece{
-    mesh: floor1,
+    mesh: mesh_floor1, matl:MATL_TILE,
     trfm: rdr.mat.id
   })
   pieces.push(Piece{
-    mesh: floor2a,
+    mesh: mesh_floor2a, matl:MATL_TILE,
     trfm: rdr.mat.id
   })
   pieces.push(Piece{
-    mesh: floor2a,
+    mesh: mesh_floor2a, matl:MATL_TILE,
     trfm: rdr.mat.translate(0,0.,m*20+20)
   })
   pieces.push(Piece{
-    mesh: floor2b,
+    mesh: mesh_floor2b, matl:MATL_TILE,
     trfm: rdr.mat.id
   })
   pieces.push(Piece{
-    mesh: floor2b,
+    mesh: mesh_floor2b, matl:MATL_TILE,
     trfm: rdr.mat.translate(n*20+20,0.,0)
   })
 
   pieces.push(Piece{
-    mesh: floor2a,
+    mesh: mesh_floor2a, matl:MATL_TILE,
     trfm: rdr.mat.translate(0,26.5,0)
   })
   pieces.push(Piece{
-    mesh: floor2a,
+    mesh: mesh_floor2a, matl:MATL_TILE,
     trfm: rdr.mat.translate(0,26.5,m*20+20)
   })
   pieces.push(Piece{
-    mesh: floor2b,
+    mesh: mesh_floor2b, matl:MATL_TILE,
     trfm: rdr.mat.translate(0,26.5,0)
   })
   pieces.push(Piece{
-    mesh: floor2b,
+    mesh: mesh_floor2b, matl:MATL_TILE,
     trfm: rdr.mat.translate(n*20+20,26.5,0)
   })
 
   pieces.push(Piece{
-    mesh: roof1(m,n),
+    mesh: roof1(m,n), matl:MATL_ROOF,
     trfm: rdr.mat.translate(0,h,0)
   })
 
   for (i := 0; i < n; i++){
-    assembly1(pieces, rdr.mat.translate(20+i*20,0,0));
-    assembly3(pieces, rdr.mat.translate(20+i*20,57.5,0), (i==0)|((i==n-1)<<1));
+    end := (i==0)|((i==n-1)<<1);
+    assembly1(pieces, rdr.mat.translate(20+i*20,0,0), end);
+    assembly3(pieces, rdr.mat.translate(20+i*20,58.5,0), end);
   }
   for (i := 0; i < m; i++){
-    assembly1(pieces, rdr.mat.translate(0,0,m*20+20-i*20) @* rot90);
-    assembly3(pieces, rdr.mat.translate(0,57.5,m*20+20-i*20) @* rot90, (i==0)|((i==m-1)<<1));
+    end := (i==0)|((i==m-1)<<1);
+    assembly1(pieces, rdr.mat.translate(0,0,m*20+20-i*20) @* rot90, end);
+    assembly3(pieces, rdr.mat.translate(0,58.5,m*20+20-i*20) @* rot90, end);
   }
   for (i := 0; i < n; i++){
-    assembly1(pieces, rdr.mat.translate(n*20+20-i*20,0,m*20+40) @* rot180);
-    assembly3(pieces, rdr.mat.translate(n*20+20-i*20,57.5,m*20+40) @* rot180, (i==0)|((i==n-1)<<1));
+    end := (i==0)|((i==n-1)<<1);
+    assembly1(pieces, rdr.mat.translate(n*20+20-i*20,0,m*20+40) @* rot180, end);
+    assembly3(pieces, rdr.mat.translate(n*20+20-i*20,58.5,m*20+40) @* rot180, end);
   }
   for (i := 0; i < m; i++){
-    assembly1(pieces, rdr.mat.translate(n*20+40,0,i*20+20) @* rot270);
-    assembly3(pieces, rdr.mat.translate(n*20+40,57.5,i*20+20) @* rot270,(i==0)|((i==m-1)<<1));
+    end := (i==0)|((i==m-1)<<1);
+    assembly1(pieces, rdr.mat.translate(n*20+40,0,i*20+20) @* rot270, end);
+    assembly3(pieces, rdr.mat.translate(n*20+40,58.5,i*20+20) @* rot270, end);
     
   }
 
@@ -888,14 +1113,568 @@ func sponza(m:i32,n:i32):list[Piece]{
   assembly2(pieces, rdr.mat.translate(n*20+40,0,m*20+40) @* rot180);
   assembly2(pieces, rdr.mat.translate(n*20+40,0,0) @* rot270);
 
-  assembly2(pieces, rdr.mat.translate(0,26.5,0));
-  assembly2(pieces, rdr.mat.translate(0,26.5,m*20+40) @* rot90);
-  assembly2(pieces, rdr.mat.translate(n*20+40,26.5,m*20+40) @* rot180);
-  assembly2(pieces, rdr.mat.translate(n*20+40,26.5,0) @* rot270);
+  assembly2(pieces, rdr.mat.translate(0,27.5,0));
+  assembly2(pieces, rdr.mat.translate(0,27.5,m*20+40) @* rot90);
+  assembly2(pieces, rdr.mat.translate(n*20+40,27.5,m*20+40) @* rot180);
+  assembly2(pieces, rdr.mat.translate(n*20+40,27.5,0) @* rot270);
 
   return pieces;
 }
 
+
+func compute_tbn(
+  Ng : vec[f32,3],
+  dpdx:vec[f32,3],dpdy:vec[f32,3],
+  dtdx:vec[f32,2],dtdy:vec[f32,2],
+):vec[f32,3,3]{
+  det := dtdx.x*dtdy.y - dtdy.x*dtdx.y;
+  T := dpdx * (dtdy.y/det) + dpdy * (-dtdx.y/det);
+  B := dpdx * (-dtdy.x/det) + dpdy * (dtdx.x/det);
+  T = (T - Ng * Ng.dot(T)).dir();
+  B = (B - Ng * Ng.dot(B)).dir();
+  N := T.cross(B).dir();
+  if (N.dot(Ng)<0.0){
+    N *= -1.;
+  }
+  return {
+    T.x, T.y, T.z;
+    B.x, B.y, B.z;
+    N.x, N.y, N.z;
+  }
+}
+func gradient(
+  htex:frag.Texture, uv:vec[f32,2], texel:vec[f32,2]
+):vec[f32,2]{
+  h  := htex.sample(uv).r;
+  hU := htex.sample({(uv.x+texel.x),uv.y}).r;
+  hV := htex.sample({uv.x,(uv.y+texel.y)}).r;
+  dhu := (hU - h) / texel.x;
+  dhv := (hV - h) / texel.y;
+  return {dhu,dhv};
+}
+
+func perturb(tbn:vec[f32,3,3], dhuv:vec[f32,2], scale:f32):vec[f32,3]{
+  T := {tbn[0,0],tbn[0,1],tbn[0,2]};
+  B := {tbn[1,0],tbn[1,1],tbn[1,2]};
+  N := {tbn[2,0],tbn[2,1],tbn[2,2]};
+  return (N - scale * (dhuv.x * T + dhuv.y * B)).dir();
+}
+
+uvdbg_material := frag.program(embed (func(
+  @varying uv:vec[f32,2]
+):vec[f32,4]{
+  x := math.abs(uv.x)%1.0;
+  y := math.abs(uv.y)%1.0;
+  return {x,y,0.5,1.0};
+}) as "fragment")
+
+tex_brick := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+  w0 := 0.5;
+  h0 := 0.25;
+  gx := uv.x*2.0;
+  gy := uv.y*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  if (gy > 1.0) gy = 2.0-gy;
+
+  g1 := rand.noise(
+    6.+8.*gy,
+    7.+8.*gx);
+
+  g2 := rand.noise(
+    9.+8.*gy,
+    10.+8.*gx);
+
+  gx += ((g1-0.5)*0.05)*math.sin(uv.x*math.PI*2);
+  gy += ((g2-0.5)*0.025)*math.sin(uv.y*math.PI*2);
+  g := rand.noise(
+    2.+2.*math.cos(gy*math.PI*2),
+    3.+2.*math.sin(gy*math.PI*2),
+    4.+8.*gx);
+
+  ab := (gy % (h0*2))/(h0*2);
+  dy := gy % h0;
+  dx := gx % w0;
+
+  if (dy < 0.02){
+    g *= dy/0.02;
+  }else if (dy > 0.23){
+    g *= (0.25-dy)/0.02;
+  }
+  if (ab < 0.5){
+    if (dx < 0.02){
+      g *= dx/0.02;
+    }else if (dx > 0.48){
+      g *= (0.5-dx)/0.02;
+    }
+  }else if (ab >= 0.5 && dx > 0.23 && dx < 0.27){
+    if (dx < 0.25){
+      g *= 1.0-(dx-0.23)/0.02;
+    }else{
+      g *= 1.0-(0.27-dx)/0.02;
+    }
+  }
+  return {g,g,g,1.0};
+}) as "fragment"), tex_brick);
+frag.render();
+frag.end();
+
+// func sigmoid(x:f32,k:f32):f32{
+//   return 1./(1.+math.exp(-k*(x-0.5)));
+// }
+
+func sigmoid(x:f32,a:f32):f32{
+  if (x < 0.0) return 0.0;
+  if (x > 1.0) return 1.0;
+  a = 1.0-a;
+  y := 0.0;
+  if (x<=0.5){
+    y = ((2.0*x)**(1.0/a))/2.0;
+  } else {
+    y = 1.0 - ((2.0*(1.0-x))**(1.0/a))/2.0;
+  }
+  return y;
+}
+
+tex_tile := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+  w0 := 0.5;
+  h0 := 0.25;
+  gx := uv.x*2.0;
+  gy := uv.y*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  if (gy > 1.0) gy = 2.0-gy;
+
+  q := rand.noise(
+    2.+2.*math.cos(gy*math.PI*2),
+    3.+2.*math.sin(gy*math.PI*2),
+    4.+8.*gx);
+  q = sigmoid(q+0.2,0.4)*0.8+0.2;
+
+  g := 1.0;
+  ab := (gy % (h0*2))/(h0*2);
+  dy := gy % h0;
+  dx := gx % w0;
+
+  if (dy < 0.01){
+    g *= dy/0.01;
+  }else if (dy > 0.24){
+    g *= (0.25-dy)/0.01;
+  }
+  if (ab < 0.5){
+    if (dx < 0.01){
+      g *= dx/0.01;
+    }else if (dx > 0.49){
+      g *= (0.5-dx)/0.01;
+    }
+  }else if (ab >= 0.5 && dx > 0.24 && dx < 0.26){
+    if (dx < 0.25){
+      g *= 1.0-(dx-0.24)/0.01;
+    }else{
+      g *= 1.0-(0.26-dx)/0.01;
+    }
+  }
+  g = (g*0.5+0.5)*q;
+  return {g,g,g,1.0};
+}) as "fragment"), tex_tile);
+frag.render();
+frag.end();
+
+
+tex_noise := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+  gx := uv.x*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+
+  gy := uv.y*2.0;
+  if (gy > 1.0) gy = 2.0-gy;
+
+  return {
+    rand.noise(gx,gy),
+    rand.noise(gx*4,gy*4),
+    rand.noise(gx*16,gy*16),
+    1.0};
+  
+}) as "fragment"), tex_noise);
+frag.render();
+frag.end();
+
+tex_blank := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+):vec[f32,4]{
+  return {1.0,1.0,1.0,1.0}
+}) as "fragment"), tex_blank);
+frag.render();
+frag.end();
+
+
+tex_col1 := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gx := uv.x*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  gy := uv.y;
+  g := 1.0;
+  dy := gy % 0.25;
+
+  q := rand.noise(
+    2.+16.*gy,
+    4.+16.*gx);
+  q = sigmoid(q+0.2,0.6)*0.3+0.7;
+
+  if (dy < 0.01){
+    g *= dy/0.01;
+  }else if (dy > 0.24){
+    g *= (0.25-dy)/0.01;
+  }
+  g = (g*0.5+0.5)*q;
+  return {g,g,g,1.0};
+
+}) as "fragment"), tex_col1);
+frag.render();
+frag.end();
+
+
+tex_arch := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gx := uv.x*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  gy := uv.y;
+  g := 1.0;
+  dy := gy % 0.1;
+
+  q := rand.noise(
+    2.+64.*gy,
+    4.+16.*gx);
+  q = sigmoid(q+0.2,0.6)*0.3+0.7;
+
+  if (dy < 0.005){
+    g *= dy/0.005;
+  }else if (dy > 0.095){
+    g *= (0.1-dy)/0.005;
+  }
+  g = (g*0.3+0.7)*q;
+  return {g,g,g,1.0};
+
+}) as "fragment"), tex_arch);
+frag.render();
+frag.end();
+
+
+
+tex_col2 := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gx := uv.x*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  gy := uv.y;
+  g := 1.0;
+  dy := gy % 0.2;
+
+  q := rand.noise(
+    2.+32.*gy,
+    4.+16.*gx);
+  q = sigmoid(q+0.2,0.6)*0.3+0.7;
+
+  if (dy < 0.01){
+    g *= dy/0.01;
+  }else if (dy > 0.19){
+    g *= (0.2-dy)/0.01;
+  }
+  g = (g*0.3+0.7)*q;
+  return {g,g,g,1.0};
+
+}) as "fragment"), tex_col2);
+frag.render();
+frag.end();
+
+
+tex_ledge := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gy := uv.y*2.0;
+  if (gy > 1.0) gy = 2.0-gy;
+  gx := uv.x;
+  g := 1.0;
+  dx := gx % 0.2;
+
+  q := rand.noise(
+    2.+16.*gy,
+    4.+32.*gx);
+  q = sigmoid(q+0.2,0.6)*0.3+0.7;
+
+  if (dx < 0.01){
+    g *= dx/0.01;
+  }else if (dx > 0.19){
+    g *= (0.2-dx)/0.01;
+  }
+  g = (g*0.3+0.7)*q;
+  return {g,g,g,1.0};
+
+}) as "fragment"), tex_ledge);
+frag.render();
+frag.end();
+
+
+tex_ceil := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gy := uv.y;
+  gx := uv.x;
+
+  q := rand.noise(
+    2.+64.*gy,
+    4.+64.*gx);
+  q = sigmoid(q+0.3,0.8)*0.3+0.7;
+
+  g := 1.0;
+
+  g = (g*0.2+0.8)*q;
+  return {g,g,g,1.0};
+
+}) as "fragment"), tex_ceil);
+frag.render();
+frag.end();
+
+
+
+tex_slab := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gy := uv.y;
+  gx := uv.x;
+
+  q := rand.noise(
+    2.+32.*gy,
+    4.+128.*gx);
+  q = sigmoid(q+0.3,0.8)*0.3+0.7;
+
+  g := 1.0;
+
+  g = (g*0.2+0.8)*q;
+  return {g,g,g,1.0};
+
+}) as "fragment"), tex_slab);
+frag.render();
+frag.end();
+
+
+tex_volute := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gy := uv.y;
+  gx := uv.x;
+  g := 1.0;
+
+  if (gx < 0.5){
+    gx *= 2.;
+
+    dx := gx - 0.7;
+    dy := gy - 0.35;
+    d := (dx*dx+dy*dy)**0.5;
+    
+    if (d < 0.2){
+      g = math.sin(d*100.0)*0.5+0.5;
+    }else if (gy < 0.35){
+      g = math.sin((gx-gy*0.8)*80.0)*0.5+0.5;
+    }
+  }else{
+    gx = (gx-0.5)*0.25;
+  }
+
+  q := rand.noise(
+    2.+32.*gx,
+    4.+32.*gy);
+  q = sigmoid(q+0.2,0.8)*0.4+0.6;
+
+  g = g*q;
+
+  return {g,g,g,1.0}
+
+}) as "fragment"), tex_volute);
+frag.render();
+frag.end();
+
+
+tex_roof := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gx := uv.x*2.0;
+  gy := uv.y*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  if (gy > 1.0) gy = 2.0-gy;
+
+  wav := math.cos(gx*16*math.PI);
+  g := wav*0.5+0.5;
+  q := rand.noise(
+    2.+32.*gy,
+    4.+32.*gx);
+  q = sigmoid(q+0.2,0.6)*0.3+0.7;
+
+  gy = uv.y + wav*0.005;
+
+  dy := gy % 0.5;
+  if (dy < 0.02){
+    g *= dy/0.02;
+  }else if (dy > 0.49){
+    g *= (0.5-dy)/0.01;
+  }
+  g = g*q;
+
+  return {g,g,g,1.0};
+
+}) as "fragment"), tex_roof);
+frag.render();
+frag.end();
+
+
+phong_material := frag.program(embed (func(
+  @varying normal : vec[f32,3],
+  @varying position : vec[f32,3],
+  @uniform eye : vec[f32,3],
+  @uniform l_dir : vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform map_bump: frag.Texture,
+  @uniform map_noise: frag.Texture,
+  @uniform map_ao: frag.Texture,
+  @uniform map_shadow : frag.Texture,
+  @builtin frag_coord : vec[f32,4],
+  @derived d_position_dx : vec[f32,3],
+  @derived d_position_dy : vec[f32,3],
+  @derived d_uv_dx : vec[f32,2],
+  @derived d_uv_dy : vec[f32,2],
+  @uniform uv_scale : vec[f32,2],
+  @uniform uv_offset : vec[f32,2],
+  @uniform tint0 : vec[f32,3],
+  @uniform tint1 : vec[f32,3],
+  @uniform k_tint : f32,
+  @uniform shininess : f32,
+  @uniform bumpiness : f32,
+  @uniform col_ambi : vec[f32,3],
+  @uniform col_spec : vec[f32,3],
+  @uniform noise_lvl : i32,
+  @uniform bump2diff : f32,
+  @uniform bump2ambi : f32,
+  @uniform shadow_matrix:vec[f32,4,4],
+):vec[f32,4]{
+
+  ruv := (uv+uv_offset)*uv_scale;
+
+  texel := {0.001,0.001};
+  dhuv := gradient(map_bump,ruv,texel);
+  tbn := compute_tbn(
+    normal,
+    d_position_dx,d_position_dy,
+    d_uv_dx,d_uv_dy
+  );
+  nml := perturb(tbn,dhuv,bumpiness);
+
+  view_dir := eye - position;
+  half_vec := (l_dir + view_dir).dir();
+  ndl := math.max(nml.dot(l_dir),0.0);
+  ndh := math.max(nml.dot(half_vec),0.0);
+
+  g := 0.;
+  if (noise_lvl == 0){
+    g = map_noise.sample(ruv).x;
+  }else if (noise_lvl == 1){
+    g = map_noise.sample(ruv).y;
+  }else{
+    g = map_noise.sample(ruv).z;
+  }
+  g = sigmoid(g,k_tint);
+
+  tint := tint0 * (1.-g) + tint1 * g;
+
+  ao := map_ao.sample(ruv).xyz;
+
+  col := map_bump.sample(ruv).xyz;
+  diff := (col * bump2diff + (1.0-bump2diff)) * ao * ndl * tint;
+  ambi := (col * bump2ambi + (1.0-bump2ambi)) * ao * col_ambi * tint;
+  spec := col_spec * (ndh ** shininess);
+  color := diff+ambi+spec;
+
+  bias := 0.003;
+  shadow_coord := (shadow_matrix @* {position.x,position.y,position.z,1.0}).xyzw;
+  sh := (shadow_coord.xyz/shadow_coord.w)*0.5+0.5;
+  samp := 1.0;
+  for (i:=-2; i<=2; i++){
+    for (j:=-2; j<=2; j++){
+      if (map_shadow.sample(sh.xy+{(i as f32),j}*0.001).x<sh.z-bias){
+        samp -= 0.022;
+      }
+    }
+  }
+  color *= samp;
+
+  return {...color,1.0};
+}) as "fragment")
+
+shadow_material := frag.program(embed(func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3]
+):vec[f32,4]{
+  c := frag_coord.z;
+  return {c,c,c,1.0};
+}) as "fragment");
+
+map_shadow := frag.texture(1024,1024);
 
 normal_material := frag.program(embed (func(
   @builtin frag_coord:vec[f32,4],
@@ -903,32 +1682,35 @@ normal_material := frag.program(embed (func(
   @varying position:vec[f32,3],
   @uniform view:vec[f32,4,4],
 ):vec[f32,4]{
-  // c := normal*0.5+0.5;
-  // return {c.x,c.y,c.z,1.0};
-  
-  c := normal.dot({0.1,0.2,0.3}.dir());
+  c := normal*0.5+0.5;
+  return {c.x,c.y,c.z,1.0};
+}) as "fragment");
+
+modelling_material := frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying position:vec[f32,3],
+  @uniform view:vec[f32,4,4],
+  @uniform l_dir:vec[f32,3],
+):vec[f32,4]{
+  c := normal.dot(l_dir);
   c = c*0.4+0.6;
-  // return {c,c,c,1.0};
-  
   pw := {position.x, position.y, position.z, 1.0};
   pw = view @* pw;
   z := -pw.z/pw.w;
   z = 1.0-(z-10.0)/(120.0);
-  // return {z,z,z,1.0};
-
   c *= z;
   return {c,c,c,1.0};
-
 }) as "fragment");
 
 
 cam := rdr.Camera{};
 cam.perspective(60,W/(H as f32),0.1,1000.0);
 
-eye := {0.,0,50};
+eye := {110.,15.,40};
 
-yaw := -math.PI;
-pitch := 0.;
+yaw := -math.PI/2;
+pitch := 0.2;
 
 vel := {0.,0.,0.};
 spd := 0.05;
@@ -940,27 +1722,224 @@ drag := {0.,0.,0.};
 pieces := sponza(2,5);
 
 while (1){
-  
   time.fps(120);
-  rdr.background(0.61,0.63,0.65);
+  rdr.background(0.67,0.67,0.67);
 
   forward := ({
     math.cos(pitch)*math.sin(yaw),
     math.sin(pitch),
     math.cos(pitch)*math.cos(yaw)
   }).dir();
-  right := forward.cross({0.,1.,0.});
+  right := forward.cross({0.,1.,0.}).dir();
   up := right.cross(forward);
 
   cam.look_at(eye,eye+forward,rdr.AXIS_Y);
 
-  frag.begin(normal_material);
-  cam.begin();
+  l_dir := {1.0,5.0,2.0}.dir();
+  light := rdr.Camera{};
+  light.look_at(l_dir,{0.,0,0},rdr.AXIS_Y);
+  light.ortho(-50,150,-150,50,-150,50);
+  shadow_matrix := light.proj@*light.view;
+
+
+  frag.begin(shadow_material,map_shadow);
+  rdr.background(0.0);
+  light.begin();
   for (i := 0; i < pieces.length(); i++){
     pieces[i].mesh.draw(pieces[i].trfm);
   }
-  cam.end();
+  light.end();
   frag.end();
+  
+  for (i := 0; i < pieces.length(); i++){
+    mt := (pieces[i].matl&MASK_MATL_TYP);
+    mv := (pieces[i].matl&MASK_MATL_VAR);
+    frag.begin(phong_material);
+    frag.uniform("map_noise",tex_noise);
+    frag.uniform("eye",eye);
+    frag.uniform("l_dir",l_dir);
+    frag.uniform("map_shadow",map_shadow);
+    frag.uniform("shadow_matrix",shadow_matrix);
+
+    if (mt == MATL_NONE){
+      frag.begin(uvdbg_material);
+    }else if (mt == MATL_BRIK){
+      frag.uniform("map_bump",tex_brick);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",10.0);
+      frag.uniform("bumpiness",0.02);
+      frag.uniform("tint0",{1.0,1.0,1.0});
+      frag.uniform("tint1",{0.5,0.5,0.5});
+      frag.uniform("col_ambi",{0.2,0.2,0.2});
+      frag.uniform("col_spec",{0.1,0.1,0.1});
+      frag.uniform("uv_scale",{0.1,0.1});
+      frag.uniform("uv_offset",{10.0,10.0});
+      frag.uniform("bump2diff",0.5);
+      frag.uniform("bump2ambi",0.5);
+      frag.uniform("noise_lvl",0);
+      frag.uniform("k_tint",0);
+
+    }else if (mt == MATL_TILE){
+      frag.uniform("map_bump",tex_tile);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",32.0);
+      frag.uniform("bumpiness",0.01);
+      frag.uniform("tint0",{0.5,0.5,0.5});
+      frag.uniform("tint1",{0.5,0.5,0.5});
+      frag.uniform("col_ambi",{0.2,0.2,0.2});
+      frag.uniform("col_spec",{0.2,0.2,0.2});
+      frag.uniform("uv_scale",{1.0/32,1.0/32});
+      frag.uniform("uv_offset",{0.0,0.0});
+      frag.uniform("bump2diff",0.1);
+      frag.uniform("bump2ambi",0.1);
+      frag.uniform("noise_lvl",0);
+      frag.uniform("k_tint",0.0);
+    }else if (mt == MATL_COL1){
+      frag.uniform("map_bump",tex_col1);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",20.0);
+      frag.uniform("bumpiness",0.02);
+      frag.uniform("tint0",{1.0,1.0,1.0});
+      frag.uniform("tint1",{0.5,0.5,0.5});
+      frag.uniform("col_ambi",{0.2,0.2,0.2});
+      frag.uniform("col_spec",{0.2,0.2,0.2});
+      frag.uniform("uv_scale",{1.0,1.0});
+      frag.uniform("uv_offset",{0.0,0.0});
+      frag.uniform("bump2diff",0.2);
+      frag.uniform("bump2ambi",0.2);
+      frag.uniform("noise_lvl",1);
+      frag.uniform("k_tint",0.8);
+    }else if (mt == MATL_ARCH){
+      frag.uniform("map_bump",tex_arch);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",10.0);
+      frag.uniform("bumpiness",0.01);
+      frag.uniform("tint0",{1.0,1.0,1.0});
+      frag.uniform("tint1",{0.5,0.5,0.5});
+      frag.uniform("col_ambi",{0.2,0.2,0.2});
+      frag.uniform("col_spec",{0.2,0.2,0.2});
+      frag.uniform("uv_scale",{0.5,(mv as f32)/10.0});
+      frag.uniform("uv_offset",{0.0,0.0});
+      frag.uniform("bump2diff",0.2);
+      frag.uniform("bump2ambi",0.2);
+      frag.uniform("noise_lvl",1);
+      frag.uniform("k_tint",0.8);
+    }else if (mt == MATL_COL2){
+      frag.uniform("map_bump",tex_col2);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",10.0);
+      frag.uniform("bumpiness",0.02);
+      frag.uniform("tint0",{1.0,1.0,1.0});
+      frag.uniform("tint1",{0.6,0.6,0.6});
+      frag.uniform("col_ambi",{0.2,0.2,0.2});
+      frag.uniform("col_spec",{0.2,0.2,0.2});
+      frag.uniform("uv_scale",{1.0,1.0});
+      frag.uniform("uv_offset",{0.0,0.0});
+      frag.uniform("bump2diff",0.2);
+      frag.uniform("bump2ambi",0.2);
+      frag.uniform("noise_lvl",1);
+      frag.uniform("k_tint",0.8);
+    }else if (mt == MATL_LEDG){
+      frag.uniform("map_bump",tex_ledge);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",10.0);
+      frag.uniform("bumpiness",0.02);
+      frag.uniform("tint0",{0.2,0.2,0.2});
+      frag.uniform("tint1",{0.1,0.1,0.1});
+      frag.uniform("col_ambi",{0.1,0.1,0.1});
+      frag.uniform("col_spec",{0.2,0.2,0.2});
+      frag.uniform("uv_scale",{1.0,1.0});
+      frag.uniform("uv_offset",{0.0,0.0});
+      frag.uniform("bump2diff",0.2);
+      frag.uniform("bump2ambi",0.2);
+      frag.uniform("noise_lvl",2);
+      frag.uniform("k_tint",0.8);
+    }else if (mt == MATL_CEIL){
+      frag.uniform("map_bump",tex_ceil);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",5.0);
+      frag.uniform("bumpiness",0.005);
+      frag.uniform("tint0",{0.9,0.9,0.9});
+      frag.uniform("tint1",{0.7,0.7,0.7});
+      frag.uniform("col_ambi",{0.15,0.15,0.15});
+      frag.uniform("col_spec",{0.2,0.2,0.2});
+      frag.uniform("uv_scale",{0.666,1.0});
+      frag.uniform("uv_offset",{0.0,0.0});
+      frag.uniform("bump2diff",0.2);
+      frag.uniform("bump2ambi",0.2);
+      frag.uniform("noise_lvl",1);
+      frag.uniform("k_tint",0.7);
+    }else if (mt == MATL_CAP1){
+      frag.uniform("map_bump",tex_slab);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",10.0);
+      frag.uniform("bumpiness",0.01);
+      frag.uniform("tint0",{0.9,0.9,0.9});
+      frag.uniform("tint1",{0.7,0.7,0.7});
+      frag.uniform("col_ambi",{0.15,0.15,0.15});
+      frag.uniform("col_spec",{0.2,0.2,0.2});
+      frag.uniform("uv_scale",{1.0,1.0});
+      frag.uniform("uv_offset",{0.0,0.0});
+      frag.uniform("bump2diff",0.2);
+      frag.uniform("bump2ambi",0.2);
+      frag.uniform("noise_lvl",1);
+      frag.uniform("k_tint",0.7);
+    }else if (mt == MATL_COL3){
+      frag.uniform("map_bump",tex_slab);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",10.0);
+      frag.uniform("bumpiness",0.01);
+      frag.uniform("tint0",{0.9,0.9,0.9});
+      frag.uniform("tint1",{0.7,0.7,0.7});
+      frag.uniform("col_ambi",{0.15,0.15,0.15});
+      frag.uniform("col_spec",{0.2,0.2,0.2});
+      frag.uniform("uv_scale",{1.0,2.0});
+      frag.uniform("uv_offset",{2.0,2.0});
+      frag.uniform("bump2diff",0.2);
+      frag.uniform("bump2ambi",0.2);
+      frag.uniform("noise_lvl",1);
+      frag.uniform("k_tint",0.7);
+    }else if (mt == MATL_VOLU){
+      frag.uniform("map_bump",tex_volute);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",10.0);
+      frag.uniform("bumpiness",0.01);
+      frag.uniform("tint0",{0.9,0.9,0.9});
+      frag.uniform("tint1",{0.7,0.7,0.7});
+      frag.uniform("col_ambi",{0.15,0.15,0.15});
+      frag.uniform("col_spec",{0.2,0.2,0.2});
+      frag.uniform("uv_scale",{1.0,1.0});
+      frag.uniform("uv_offset",{0.0,0.0});
+      frag.uniform("bump2diff",0.2);
+      frag.uniform("bump2ambi",0.2);
+      frag.uniform("noise_lvl",1);
+      frag.uniform("k_tint",0.7);
+    }else if (mt == MATL_ROOF){
+      frag.uniform("map_bump",tex_roof);
+      frag.uniform("map_ao",tex_blank);
+      frag.uniform("shininess",5.0);
+      frag.uniform("bumpiness",0.03);
+      frag.uniform("tint0",{0.2,0.2,0.2});
+      frag.uniform("tint1",{0.1,0.1,0.1});
+      frag.uniform("col_ambi",{0.1,0.1,0.1});
+      frag.uniform("col_spec",{0.2,0.2,0.2});
+      frag.uniform("uv_scale",{0.1,0.1});
+      frag.uniform("uv_offset",{10.0,10.0});
+      frag.uniform("bump2diff",0.0);
+      frag.uniform("bump2ambi",0.0);
+      frag.uniform("noise_lvl",0);
+      frag.uniform("k_tint",0.5);
+    }else{
+      frag.begin(uvdbg_material);
+    }
+    // frag.begin(modelling_material);
+    // frag.uniform("l_dir",l_dir);
+    cam.begin();
+    pieces[i].mesh.draw(pieces[i].trfm);
+    cam.end();
+    frag.end();
+  }
+
 
 
   if (keys_held['w']){
