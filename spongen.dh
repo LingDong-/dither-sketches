@@ -26,6 +26,8 @@ MATL_CAP1      := (8<<4)
 MATL_COL3      := (9<<4)
 MATL_VOLU      := (10<<4)
 MATL_ROOF      := (11<<4)
+MATL_FABR      := (12<<4)
+MATL_POLE      := (13<<4)
 
 typedef Piece = {
   mesh: rdr.Mesh;
@@ -191,7 +193,7 @@ func smooth_tube_lon(mesh:rdr.Mesh,m:i32,n:i32){
   }
 }
 
-func add_vase(mesh:rdr.Mesh,prof:list[vec[f32,3]],n:i32,phase:f32){
+func add_vase(mesh:rdr.Mesh,prof:list[vec[f32,3]],n:i32,phase:f32,axis:vec[f32,3]){
   faces := list[list[vec[f32,3]]]{};
   for (i := 0; i < prof.length(); i++){
     f := list[vec[f32,3]]{};
@@ -199,7 +201,7 @@ func add_vase(mesh:rdr.Mesh,prof:list[vec[f32,3]],n:i32,phase:f32){
   }
   for (i := 0; i < n; i++){
     a := i/(n as f32) * 360.0 + phase;
-    m := rdr.mat.rotate_deg(rdr.AXIS_Y,a);
+    m := rdr.mat.rotate_deg(axis,a);
     for (j := 0; j < prof.length(); j++){
       v := (m @* {...prof[j],1.}).xyzw;
       faces[j].push(v.xyz/v.w);
@@ -304,7 +306,7 @@ func col1_cap():rdr.Mesh{
     {1.75,-2.75,1.75},
     {1.,-2.75,1.},
   }
-  add_vase(mesh,prof,4,0.);
+  add_vase(mesh,prof,4,0.,rdr.AXIS_Y);
   return mesh;
 }
 
@@ -319,7 +321,7 @@ func col1():rdr.Mesh{
     {2.,-1.75,0.},
     {2.,-12.,0.},
   }
-  add_vase(mesh,prof,8,22.5);
+  add_vase(mesh,prof,8,22.5,rdr.AXIS_Y);
   for (i := 0; i < mesh.uvs.length(); i++){
     mesh.uvs[i] = {
       mesh.uvs[i].x,
@@ -401,7 +403,7 @@ func col2():rdr.Mesh{
     {2.25,-12,0.},
   }
   for (i := 0; i < prof.length(); i++) prof[i] = prof[i].xyx;
-  add_vase(mesh,prof,4,0.);
+  add_vase(mesh,prof,4,0.,rdr.AXIS_Y);
   for (i := 0; i < mesh.uvs.length(); i++){
     mesh.uvs[i] = {
       mesh.uvs[i].x,
@@ -427,7 +429,7 @@ func col3_cap():rdr.Mesh{
     {2.0,-12,0.},
   }
   for (i := 0; i < prof.length(); i++) prof[i] = prof[i].xyx;
-  add_vase(mesh,prof,4,0.);
+  add_vase(mesh,prof,4,0.,rdr.AXIS_Y);
   return mesh;
 }
 
@@ -488,7 +490,7 @@ func col3():rdr.Mesh{
     {0.85,-10.5,0.},
   }
   for (i := 0; i < prof.length(); i++) prof[i] = prof[i].xyx;
-  add_vase(mesh,prof,14,0.);
+  add_vase(mesh,prof,14,0.,rdr.AXIS_Y);
   for (i := 0; i < mesh.uvs.length(); i++){
     mesh.uvs[i] = {
       mesh.uvs[i].x,
@@ -793,6 +795,231 @@ func arch1_corner():rdr.Mesh{
   return mesh;
 }
 
+func drape1():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  n0 := 20;
+  m := 20;
+
+  ff := list[list[vec[f32,3]]]{};
+  fg := list[list[vec[f32,3]]]{};
+
+  rot90 := rdr.mat.rotate_deg(rdr.AXIS_X, 90);
+  for (i := 0; i < 20; i++){
+    mat0 : vec[f32,4,4];
+    w := i?0.1:0;
+    if (i < 5){
+      mat0 = rdr.mat.translate(0,-5+i,-6.5);
+    }else if (i < 10){
+      a0 := ((i-5) as f32)/5 * 90.0;
+      mat0 = rdr.mat.translate(0,0,-6) @* rdr.mat.rotate_deg(rdr.AXIS_X, a0) @* rdr.mat.translate(0,0,-0.5);
+    }else if (i < 15){
+      mat0 = rdr.mat.translate(0,0.5,-6+(i-10)*6.0/5.0) @* rot90;
+    }else{
+      a0 := 90+((i-15) as f32)/5 * 90.0;
+      mat0 = rdr.mat.translate(0,0,-0.5) @* rdr.mat.rotate_deg(rdr.AXIS_X, a0) @* rdr.mat.translate(0,0,-0.5);
+    }
+    fi := list[vec[f32,3]]{};
+    fj := list[vec[f32,3]]{};
+
+    for (j := 0; j < m; j++){
+      a1 := (j as f32)/m * math.PI*2 + math.PI;
+      v := {
+        math.cos(a1)*2.2;
+        0.0;
+        math.sin(a1)*w;
+        1.0
+      };
+      u := (mat0 @* v).xyzw;
+      fi.push(u.xyz/u.w+{-5.,0,0});
+      fj.push({5-u.x/u.w,u.y/u.w,u.z/u.w});
+    }
+    ff.push(fi);
+    fg.push(fj);
+  }
+
+  for (i := 0; i < n0; i++){
+    a0 := 180.+(i as f32)/(n0-1) * 180.0;
+    mat := rdr.mat.rotate_deg(rdr.AXIS_Z, a0);
+    fi := list[vec[f32,3]]{};
+    for (j := 0; j < m; j++){
+      a1 := (j as f32)/m * math.PI*2;
+      v := {
+        5+math.cos(a1)*2.2;
+        0.0;
+        math.sin(a1)*0.1;
+        1.0
+      };
+      u := (mat @* v).xyzw;
+      fi.push(u.xyz/u.w);
+    }
+    ff.push(fi);
+  }
+
+  for (i := fg.length()-1; i >= 0; i--){
+    ff.push(fg[i]);
+  }
+
+  for (i := 0; i < ff.length(); i++){
+    r := 1.0;
+    if (i < 8){
+      r = i/8.0;
+    }
+    if (i > ff.length()-8){
+      r = (ff.length()-i)/8.0;
+    }
+    for (j := 0; j < ff[i].length(); j++){
+      ({x,y,z}) := ff[i][j];
+      t := (y+6.1)/(6.7);
+      s := math.abs(x)/6.1;
+      dz := 0.0;
+      if (x < 0){
+        dz = math.cos((x+y*0.5)*math.PI)*0.25*math.sin(t*math.PI)*math.sin(s*math.PI)
+      }else{
+        dz = math.cos((-x+y*0.8)*math.PI)*0.2*math.sin(t*math.PI)*math.sin(s*math.PI)
+      }
+      ff[i][j] += {
+        0.0,
+        -math.cos(x*math.PI)*0.1*t - (1-t),
+        dz * r,
+      };
+
+    }
+  }
+
+  add_tube(mesh,ff);
+  smooth_tube_lon(mesh,m,n0+40);
+  smooth_tube_lat(mesh,m,n0+40);
+  // mesh.mode = rdr.MODE_LINE_LIST;
+  return mesh;
+}
+
+
+func drape2():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  ff := list[list[vec[f32,3]]]{};
+
+  m := 64;
+  n := 16;
+  for (i := 0; i < n; i++){
+    a0 := (i as f32)/(n-1);
+    fi := list[vec[f32,3]]{};
+    w := 0.15;
+    if (i==0 || i==n-1) w = 0.0;
+    for (j := 0; j < m; j++){
+      a1 := -(j as f32)/m * math.PI*2;
+      v := {
+        math.cos(a1)*(6.0-a0*a0*0.2),
+        -a0* 16.0,
+        math.sin(a1)*w,
+      }
+      fi.push(v);
+    }
+    ff.push(fi);
+  }
+ 
+
+  for (i := 0; i < ff.length(); i++){
+    r := 1.0;
+    if (i < 8){
+      r = i/8.0;
+    }
+    if (i > ff.length()-8){
+      r = (ff.length()-i)/8.0;
+    }
+    for (j := 0; j < ff[i].length(); j++){
+      ({x,y,z}) := ff[i][j];
+      t := -y/16.0;
+      s := (x+6.0)/12.0;
+      ff[i][j] += {
+        0.0,
+        math.cos(1.1*x*math.PI)*0.15 * (1-t) - math.sin(s*math.PI)*t*0.25,
+        math.sin(1.1*(x+y*0.05)*math.PI)*(0.3-s*0.25) * (1-t) + math.sin(0.6*(x-y*0.05)*math.PI)*(0.05+s*0.45) * t,
+      };
+      ff[i][j] *= {math.min(t,0.02)+0.98,1.0,1.0};
+    }
+  }
+  add_tube(mesh,ff);
+  smooth_tube_lon(mesh,m,n);
+  smooth_tube_lat(mesh,m,n);
+  // mesh.mode = rdr.MODE_LINE_LIST;
+  return mesh;
+}
+
+func pole1():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  prof := list[vec[f32,3]]{
+    {8,0.45,0.},
+    {6.8,0.45,0.},
+    {6.8,0.35,0.},
+    {6.5,0.35,0.},
+    {6.5,0.2,0.},
+    {-6.5,0.2,0.},
+    {-6.5,0.35,0.},
+    {-6.8,0.35,0.},
+    {-6.8,0.45,0.},
+    {-8,0.45,0.},
+  }
+  add_vase(mesh,prof,10,0.,rdr.AXIS_X);
+  for (i := 0; i < mesh.uvs.length(); i++){
+    mesh.uvs[i] = {
+      mesh.uvs[i].x,
+      (mesh.vertices[i].x+8.0)/16.0
+    };
+  }
+  smooth_tube_lat(mesh,10,prof.length());
+  return mesh;
+}
+
+func pole2():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  n := 10;
+
+  proe := list[vec[f32,3]]{
+    {0.0001,0.0,7.5},
+    {0.1,0.0,7.5},
+    {0.3,0.0,6.5},
+    {0.2,0.0,6.0},
+    {0.2,0.0,0.0},
+  }
+  ff := list[list[vec[f32,3]]]{};
+  for (i := 0; i < proe.length(); i++){
+    f := list[vec[f32,3]]{};
+    ff.push(f);
+  }
+  m0 := rdr.mat.translate(0,-0.125,0) @* rdr.mat.rotate_deg(rdr.AXIS_X,-15);
+  for (i := 0; i < n; i++){
+    a := i/(n as f32) * 360.0;
+    m := m0 @* rdr.mat.rotate_deg(rdr.AXIS_Z,a);
+    for (j := 0; j < proe.length(); j++){
+      v := (m @* {...proe[j],1.}).xyzw;
+      ff[j].push(v.xyz/v.w);
+    }
+  }
+  add_tube(mesh,ff);
+
+  for (i := 0; i < mesh.uvs.length(); i++){
+    mesh.uvs[i] = {
+      mesh.uvs[i].x,
+      (mesh.vertices[i].z)/7.5
+    };
+  }
+
+  smooth_tube_lat(mesh,n,proe.length());
+
+  prof := list[vec[f32,3]]{
+    {0.1,0.0,0.5},
+    {0.35,0.0,0.5},
+    {0.35,0.0,0.25},
+    {0.5,0.0,0.25},
+    {0.5,0.0,0.},
+  }
+  add_vase(mesh,prof,n,0.,rdr.AXIS_Z);
+    
+  return mesh;
+}
+
+
+
 mesh_arch1 := arch1();
 mesh_arch1_edge := arch1_edge();
 mesh_col1_cap := col1_cap();
@@ -815,6 +1042,10 @@ mesh_ledge1b := ledge1(1);
 mesh_ledge1c := ledge1(2);
 mesh_ledge1d := ledge1(3);
 mesh_arch1_corner := arch1_corner();
+mesh_drape1 := drape1();
+mesh_drape2 := drape2();
+mesh_pole1 := pole1();
+mesh_pole2 := pole2();
 
 func assembly1(pieces:list[Piece], trfm:vec[f32,4,4], end:i32){
   pieces.push(Piece{
@@ -999,7 +1230,27 @@ func assembly3(pieces:list[Piece], trfm:vec[f32,4,4], end:i32){
   }
 }
 
+func assembly4(pieces:list[Piece], trfm:vec[f32,4,4], end:i32){
+  if (!(end&1)){
+    pieces.push(Piece{
+      mesh: mesh_drape1, matl:MATL_FABR,
+      trfm: trfm @* rdr.mat.translate(0.,30.2,23.7)
+    })
+  }
+  pieces.push(Piece{
+    mesh: mesh_drape2, matl:MATL_FABR,
+    trfm: trfm @* rdr.mat.translate(10.,16.5,20)
+  })
+  pieces.push(Piece{
+    mesh: mesh_pole1, matl:MATL_POLE,
+    trfm: trfm @* rdr.mat.translate(10.,16.8,20)
+  })
+  pieces.push(Piece{
+    mesh: mesh_pole2, matl:MATL_POLE,
+    trfm: trfm @* rdr.mat.translate(10.,50.65,22)
+  })
 
+}
 
 func sponza(m:i32,n:i32):list[Piece]{
   pieces := list[Piece]{};
@@ -1089,6 +1340,7 @@ func sponza(m:i32,n:i32):list[Piece]{
     end := (i==0)|((i==n-1)<<1);
     assembly1(pieces, rdr.mat.translate(20+i*20,0,0), end);
     assembly3(pieces, rdr.mat.translate(20+i*20,58.5,0), end);
+    assembly4(pieces, rdr.mat.translate(20+i*20,0,0), end);
   }
   for (i := 0; i < m; i++){
     end := (i==0)|((i==m-1)<<1);
@@ -1099,6 +1351,7 @@ func sponza(m:i32,n:i32):list[Piece]{
     end := (i==0)|((i==n-1)<<1);
     assembly1(pieces, rdr.mat.translate(n*20+20-i*20,0,m*20+40) @* rot180, end);
     assembly3(pieces, rdr.mat.translate(n*20+20-i*20,58.5,m*20+40) @* rot180, end);
+    assembly4(pieces, rdr.mat.translate(n*20+20-i*20,0,m*20+40) @* rot180, end);
   }
   for (i := 0; i < m; i++){
     end := (i==0)|((i==m-1)<<1);
@@ -1573,17 +1826,69 @@ frag.begin(frag.program(embed (func(
 
   gy = uv.y + wav*0.005;
 
-  dy := gy % 0.5;
+  dy := gy % 0.2;
   if (dy < 0.02){
     g *= dy/0.02;
-  }else if (dy > 0.49){
-    g *= (0.5-dy)/0.01;
+  }else if (dy > 0.19){
+    g *= (0.2-dy)/0.01;
   }
   g = g*q;
 
   return {g,g,g,1.0};
 
 }) as "fragment"), tex_roof);
+frag.render();
+frag.end();
+
+
+tex_fabric := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+  gx := uv.x*2.0;
+  gy := uv.y*2.0;
+
+  q := rand.noise(
+    2.+32.*gy,
+    4.+64.*gx);
+  q = sigmoid(q,0.6)*0.1+0.9;
+
+  g := math.sin(uv.x*50.0)*0.2+0.5;
+  g *= q;
+
+  return {g,g,g,1.0};
+  
+}) as "fragment"), tex_fabric);
+frag.render();
+frag.end();
+
+
+tex_pole := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gy := uv.y;
+  gx := uv.x*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+
+  q := rand.noise(
+    2.+128.*gy,
+    4.+16.*gx);
+  q = sigmoid(q,0.5)*0.3+0.7;
+
+  g := 1.0;
+
+  g = (g*0.2+0.8)*q;
+  return {g,g,g,1.0};
+
+}) as "fragment"), tex_pole);
 frag.render();
 frag.end();
 
@@ -1767,7 +2072,7 @@ while (1){
         frag.end();
       }
       if (mt == MATL_NONE){
-        frag.begin(uvdbg_material);
+        frag.begin(modelling_material);
       }else{
         frag.begin(phong_material);
       }
@@ -1938,15 +2243,45 @@ while (1){
         frag.uniform("tint1",{0.1,0.1,0.1});
         frag.uniform("col_ambi",{0.1,0.1,0.1});
         frag.uniform("col_spec",{0.2,0.2,0.2});
-        frag.uniform("uv_scale",{0.1,0.1});
-        frag.uniform("uv_offset",{10.0,10.0});
+        frag.uniform("uv_scale",{0.05,0.05});
+        frag.uniform("uv_offset",{20.0,20.0});
         frag.uniform("bump2diff",0.0);
         frag.uniform("bump2ambi",0.0);
         frag.uniform("noise_lvl",0);
         frag.uniform("k_tint",0.5);
+      }else if (mt == MATL_FABR){
+        frag.uniform("map_bump",tex_fabric);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{1.0,1.0,1.0});
+        frag.uniform("tint1",{0.85,0.85,0.85});
+        frag.uniform("col_ambi",{0.3,0.3,0.3});
+        frag.uniform("col_spec",{0.1,0.1,0.1});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.0);
+        frag.uniform("bump2ambi",0.0);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.8);
+      }else if (mt == MATL_POLE){
+        frag.uniform("map_bump",tex_pole);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",50.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{0.2,0.2,0.2});
+        frag.uniform("tint1",{0.1,0.1,0.1});
+        frag.uniform("col_ambi",{0.1,0.1,0.1});
+        frag.uniform("col_spec",{0.5,0.5,0.5});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.0);
+        frag.uniform("bump2ambi",0.0);
+        frag.uniform("noise_lvl",2);
+        frag.uniform("k_tint",0.8);
       }
     }
-    
+    // pieces[i].mesh.mode = rdr.MODE_LINE_LIST;
     pieces[i].mesh.draw(pieces[i].trfm);
 
     lmatl = pieces[i].matl;
