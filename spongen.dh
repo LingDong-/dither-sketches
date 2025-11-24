@@ -2075,6 +2075,36 @@ modelling_material := frag.program(embed (func(
   return {c,c,c,1.0};
 }) as "fragment");
 
+func light_bounds(view:vec[f32,4,4],m:i32,n:i32):vec[f32,6]{
+  min := {
+    -4.,-4.,-4.
+  }
+  siz := {
+    n*20.+44.,110.,m*20.+44.
+  }-min;
+  left:=math.INF;
+  right:=-math.INF;
+  bottom:=math.INF;
+  top:=-math.INF;
+  near:=math.INF;
+  far:=-math.INF;
+  for (x := 0; x < 2; x++){
+    for (y := 0; y < 2; y++){
+      for (z := 0; z < 2; z++){
+        corner := {min.x+x*siz.x, min.y+y*siz.y, min.z+z*siz.z};
+        lsw := (view @* {...corner,1.0}).xyzw;
+        ls := lsw.xyz/lsw.w;
+        left  = math.min(left,  ls.x);
+        right = math.max(right, ls.x);
+        bottom= math.min(bottom,ls.y);
+        top   = math.max(top,   ls.y);
+        near  = math.min(near,  ls.z);
+        far   = math.max(far,   ls.z);
+      }
+    }
+  }
+  return {left,right,bottom,top,-far,-near};
+}
 
 cam := rdr.Camera{};
 cam.perspective(60,W/(H as f32),0.1,1000.0);
@@ -2091,7 +2121,17 @@ asp := 0.01;
 keys_held := dict[i32,i32]{};
 drag := {0.,0.,0.};
 
-pieces := sponza(2,5);
+M := 2
+N := 5
+
+pieces := sponza(M,N);
+
+l_dir := {1.0,5.0,2.0}.dir();
+light := rdr.Camera{};
+light.look_at(l_dir,{0.,0,0},rdr.AXIS_Y);
+// light.ortho(-50,150,-150,50,-150,100);
+light.ortho(...light_bounds(light.view, M,N));
+shadow_matrix := light.proj@*light.view;
 
 while (1){
   time.fps(120);
@@ -2106,13 +2146,6 @@ while (1){
   up := right.cross(forward);
 
   cam.look_at(eye,eye+forward,rdr.AXIS_Y);
-
-  l_dir := {1.0,5.0,2.0}.dir();
-  light := rdr.Camera{};
-  light.look_at(l_dir,{0.,0,0},rdr.AXIS_Y);
-  light.ortho(-50,150,-150,50,-150,50);
-  shadow_matrix := light.proj@*light.view;
-
 
   frag.begin(shadow_material,map_shadow);
   rdr.background(0.0);
