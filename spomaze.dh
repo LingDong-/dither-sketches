@@ -1,0 +1,3006 @@
+include "std/io"
+include "std/str"
+include "std/list"
+include "std/arr"
+include "std/vec"
+include "std/dict"
+include "std/math"
+include "std/frag"
+include "std/rdr"
+include "std/win"
+include "std/time"
+include "std/rand"
+include "std/img"
+
+MAZE_W := 11
+MAZE_H := 11
+MAP_W := 25
+MAP_H := 25
+
+MASK_MATL_TYP  := 0xf0
+MASK_MATL_VAR  := 0x0f
+MATL_NONE      := 0
+MATL_ARCH      := (1<<4)
+MATL_COL2      := (2<<4)
+MATL_COL1      := (3<<4)
+MATL_TILE      := (4<<4)
+MATL_BRIK      := (5<<4)
+MATL_LEDG      := (6<<4)
+MATL_CEIL      := (7<<4)
+MATL_CAP1      := (8<<4)
+MATL_COL3      := (9<<4)
+MATL_VOLU      := (10<<4)
+MATL_ROOF      := (11<<4)
+MATL_FABR      := (12<<4)
+MATL_POLE      := (13<<4)
+
+typedef Piece = {
+  mesh: rdr.Mesh;
+  matl: i32 = 0;
+  trfm:= list[vec[f32,4,4]]{};
+}
+
+W := 800
+H := 600
+
+context := win.init(W,H,win.CONTEXT_3D);
+frag.init(context);
+rdr.init(context);
+
+func add_face(mesh:rdr.Mesh,face:list[vec[f32,3]]){
+  for (i := 1; i < face.length()-1; i++){
+    a := face[0];
+    b := face[i];
+    c := face[i+1];
+    mesh.vertices.push(a);
+    mesh.vertices.push(b);
+    mesh.vertices.push(c);
+    nml := (b-a).cross(c-b).dir();
+    mesh.normals.push(nml);
+    mesh.normals.push(nml);
+    mesh.normals.push(nml);
+    an := math.abs(nml);
+    if (an.z > an.x && an.z > an.y){
+      mesh.uvs.push(a.xy);
+      mesh.uvs.push(b.xy);
+      mesh.uvs.push(c.xy);
+    }else if (an.y > an.x && an.y > an.z){
+      mesh.uvs.push(a.xz);
+      mesh.uvs.push(b.xz);
+      mesh.uvs.push(c.xz);
+    }else{
+      mesh.uvs.push(a.zy);
+      mesh.uvs.push(b.zy);
+      mesh.uvs.push(c.zy);
+    }
+  }
+}
+func add_backface(mesh:rdr.Mesh,face:list[vec[f32,3]],dep:vec[f32,3]){
+  an := math.abs(dep);
+  for (i := 1; i < face.length()-1; i++){
+    a := face[0]+dep;
+    b := face[i]+dep;
+    c := face[i+1]+dep;
+    mesh.vertices.push(a);
+    mesh.vertices.push(c);
+    mesh.vertices.push(b);
+    nml := (c-b).cross(b-a).dir();
+    mesh.normals.push(nml);
+    mesh.normals.push(nml);
+    mesh.normals.push(nml);
+    if (an.z > an.x && an.z > an.y){
+      mesh.uvs.push(a.xy);
+      mesh.uvs.push(c.xy);
+      mesh.uvs.push(b.xy);
+    }else if (an.y > an.x && an.y > an.z){
+      mesh.uvs.push(a.xz);
+      mesh.uvs.push(c.xz);
+      mesh.uvs.push(b.xz);
+    }else{
+      mesh.uvs.push(a.zy);
+      mesh.uvs.push(c.zy);
+      mesh.uvs.push(b.zy);
+    }
+  }
+}
+func add_extrusion(mesh:rdr.Mesh,face:list[vec[f32,3]],dep:vec[f32,3]){
+  for (i := 0; i < face.length(); i++){
+    a := face[(i+1)%face.length()];
+    b := face[i];
+    c := a + dep;
+    d := b + dep;
+    mesh.vertices.push(a);
+    mesh.vertices.push(c);
+    mesh.vertices.push(b);
+    mesh.vertices.push(b);
+    mesh.vertices.push(c);
+    mesh.vertices.push(d);
+    nml := (b-a).cross(c-b).dir();
+    for (j:=0;j<6;j++){
+      mesh.normals.push(nml);
+    }
+    t0 := (i as f32)/face.length();
+    t1 := ((i+1) as f32)/face.length();
+    mesh.uvs.push({1,t0});
+    mesh.uvs.push({1,t1});
+    mesh.uvs.push({0,t0});
+    mesh.uvs.push({0,t0});
+    mesh.uvs.push({1,t1});
+    mesh.uvs.push({0,t1});
+  }
+}
+func add_tube(mesh:rdr.Mesh,faces:list[list[vec[f32,3]]]){
+  for (i := 0; i < faces.length()-1; i++){
+    t0 := (i as f32)/(faces.length()-1);
+    t1 := ((i+1) as f32)/(faces.length()-1);
+    for (j := 0; j < faces[i].length(); j++){
+      j1 := (j+1)%faces[i].length();
+      a := faces[i][j];
+      b := faces[i][j1];
+      c := faces[i+1][j];
+      d := faces[i+1][j1];
+      mesh.vertices.push(a);
+      mesh.vertices.push(b);
+      mesh.vertices.push(c);
+      mesh.vertices.push(b);
+      mesh.vertices.push(d);
+      mesh.vertices.push(c);
+      nml := (c-b).cross(b-a).dir();
+      for (k:=0;k<6;k++){
+        mesh.normals.push(nml);
+      }
+      s0 := (j as f32)/faces[i].length();
+      s1 := ((j+1) as f32)/faces[i].length();
+      mesh.uvs.push({s0,t0});
+      mesh.uvs.push({s1,t0});
+      mesh.uvs.push({s0,t1});
+      mesh.uvs.push({s1,t0});
+      mesh.uvs.push({s1,t1});
+      mesh.uvs.push({s0,t1});
+    }
+  }
+}
+func smooth_tube_lat(mesh:rdr.Mesh,m:i32,n:i32){
+  for (i := 0; i < n-1; i++){
+    for (j := 0; j < m; j++){
+      j1 := (j+1)%m;
+      b0 := mesh.normals[(i*m+j)*6+1];
+      d0 := mesh.normals[(i*m+j)*6+4];
+      a1 := mesh.normals[(i*m+j1)*6+0];
+      c1 := mesh.normals[(i*m+j1)*6+2];
+      ab := (b0+a1)*0.5;
+      cd := (d0+c1)*0.5;
+      mesh.normals[(i*m+j)*6+1] = ab;
+      mesh.normals[(i*m+j)*6+3] = ab;
+      mesh.normals[(i*m+j)*6+4] = cd;
+      mesh.normals[(i*m+j1)*6+0] = ab;
+      mesh.normals[(i*m+j1)*6+2] = cd;
+      mesh.normals[(i*m+j1)*6+5] = cd;
+    }
+  }
+}
+func smooth_tube_lon(mesh:rdr.Mesh,m:i32,n:i32){
+  for (i := 0; i < n-2; i++){
+    for (j := 0; j < m; j++){
+      c0 := mesh.normals[(i*m+j)*6+2];
+      d0 := mesh.normals[(i*m+j)*6+4];
+      a1 := mesh.normals[((i+1)*m+j)*6+0];
+      b1 := mesh.normals[((i+1)*m+j)*6+1];
+      ac := (c0+a1)*0.5;
+      bd := (d0+b1)*0.5;
+      mesh.normals[(i*m+j)*6+2] = ac;
+      mesh.normals[(i*m+j)*6+4] = bd;
+      mesh.normals[(i*m+j)*6+5] = ac;
+      mesh.normals[((i+1)*m+j)*6+0] = ac;
+      mesh.normals[((i+1)*m+j)*6+1] = bd;
+      mesh.normals[((i+1)*m+j)*6+3] = bd;
+    }
+  }
+}
+
+func add_vase(mesh:rdr.Mesh,prof:list[vec[f32,3]],n:i32,phase:f32,axis:vec[f32,3]){
+  faces := list[list[vec[f32,3]]]{};
+  for (i := 0; i < prof.length(); i++){
+    f := list[vec[f32,3]]{};
+    faces.push(f);
+  }
+  for (i := 0; i < n; i++){
+    a := i/(n as f32) * 360.0 + phase;
+    m := rdr.mat.rotate_deg(axis,a);
+    for (j := 0; j < prof.length(); j++){
+      v := (m @* {...prof[j],1.}).xyzw;
+      faces[j].push(v.xyz/v.w);
+    }
+  }
+  add_tube(mesh,faces);
+}
+
+func arch1():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  f0 := list[vec[f32,3]]{};
+  f0.push({10,15.,2.0});
+  f0.push({0.,15.,2.0});
+  n := 10;
+  for (i := 0; i < n; i++){
+    a0 := (i as f32)/(n-1) * math.PI/2;
+    a0 = math.PI/2-a0;
+    f0.push({
+      8*math.cos(a0),
+      8*math.sin(a0),
+      2.0
+    });
+  }
+  f0.push({10,0.,2.0});
+  add_face(mesh,f0);
+  // add_extrusion(mesh,f0,{0.,0.,-4.});
+  add_backface(mesh,f0,{0.,0.,-4.});
+  return mesh;
+}
+
+func arch1_edge():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  ff := list[list[vec[f32,3]]]{}
+  f0 := list[vec[f32,3]]{
+    {10.5,0.,0.},
+    {10.0,0.,2.5},{9.5,0.,2.5},{8.5,0.,2.1},{7.5,0.,2.1},
+    // {7.5,0.,-2.0},{8.5,0.,-2.0},{9.5,0.,-2.5},{10.0,0.,-2.5}
+    {7.5,0.,-2.1},{10.0,0.,-2.5}
+  };
+  n := 10;
+  for (i:=0; i < n; i++){
+    a0 := i/((n-1) as f32) * 180.0;
+    fi := list[vec[f32,3]]{};
+    mat := rdr.mat.rotate_deg(rdr.AXIS_Z, a0);
+    for (j:=0; j<f0.length(); j++){
+      v := (mat @* {...f0[j],1.}).xyzw;
+      fi.push(v.xyz/v.w);
+    }
+    ff.push(fi);
+  }
+  add_tube(mesh,ff);
+  return mesh;
+}
+
+func ceil1():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  ff := list[list[vec[f32,3]]]{};
+  n := 11;
+  for (i := 0; i < n; i++){
+    a := i/((n-1) as f32) * math.PI/2;
+    fi := list[vec[f32,3]]{
+      {8.25*math.cos(a),8.25*math.sin(a),-1.5},
+      {8.25*math.cos(a),8.25*math.sin(a),-10.75+8.25*math.cos(a)},
+      {10.0,8.25*math.sin(a),-10.75+8.25*math.cos(a)},
+    }
+    ff.push(fi);
+  }
+  add_tube(mesh,ff);
+  smooth_tube_lon(mesh,3,n);
+  return mesh;
+}
+
+func ceil1_corner():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  ff := list[list[vec[f32,3]]]{};
+  n := 11;
+  for (i := 0; i < n; i++){
+    a := i/((n-1) as f32) * math.PI/2;
+    fi := list[vec[f32,3]]{
+      {-0.75+8.25*math.cos(a),8.25*math.sin(a),-0.0},
+      {-0.75+8.25*math.cos(a),8.25*math.sin(a),-10.75+8.25*math.cos(a)},
+      {10.0,8.25*math.sin(a),-10.75+8.25*math.cos(a)},
+    }
+    ff.push(fi);
+  }
+  add_tube(mesh,ff);
+  smooth_tube_lon(mesh,3,n);
+  return mesh;
+}
+
+func col1_cap():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  prof := list[vec[f32,3]]{
+    {1.,0.,1.},
+    {3.,0.,3.},
+    {3.,-0.5,3.},
+    {2.75,-0.5,2.75},
+    {2.75,-0.75,2.75},
+    {3.,-0.75,3.},
+    {3.,-1.5,3.},
+    {2.75,-2.,2.75},
+    {1.75,-2.75,1.75},
+    {1.,-2.75,1.},
+  }
+  add_vase(mesh,prof,4,0.,rdr.AXIS_Y);
+  return mesh;
+}
+
+func col1():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  prof := list[vec[f32,3]]{
+    {2.0,0.,0.},
+    {2.0,-0.5,0.},
+    {2.25,-1.0,0.},
+    {2.0,-1.25,0.},
+    {2.25,-1.5,0.},
+    {2.,-1.75,0.},
+    {2.,-12.,0.},
+  }
+  add_vase(mesh,prof,8,22.5,rdr.AXIS_Y);
+  for (i := 0; i < mesh.uvs.length(); i++){
+    mesh.uvs[i] = {
+      mesh.uvs[i].x,
+      1.0-mesh.vertices[i].y/-12.0
+    };
+  }
+  return mesh;
+}
+
+func arch2(w:f32):rdr.Mesh{
+  mesh := rdr.Mesh{};
+  f0 := list[vec[f32,3]]{};
+  f0.push({w,15.,2});
+  f0.push({0.,15.,2});
+  r := 8.;
+  n := 11;
+  for (i := 0; i < n; i++){
+    a0 := (i as f32)/(n-1) * math.PI/3;
+    a0 = math.PI/3-a0;
+    f0.push({
+      4-r+r*math.cos(a0),
+      r*math.sin(a0)*0.8,
+      2.
+    });
+  }
+  f0.push({w,0.,2});
+  add_face(mesh,f0);
+  // add_extrusion(mesh,f0,{0.,0.,-4.});
+  add_backface(mesh,f0,{0.,0.,-4.});
+  return mesh;
+}
+
+func arch2_edge():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  ff := list[list[vec[f32,3]]]{}
+  f0 := list[vec[f32,3]]{
+    {1.0,0.,0.},
+    {0.5,0.,2.5},{0.0,0.,2.5},{-0.5,0.,2.1},{-1.0,0.,2.1},
+    {-1.0,0.,-2.1},{0.0,0.,-2.5}
+  };
+  n := 11;
+  r := 8;
+  for (i:=0; i < n; i++){
+    a0 := i/((n-1) as f32) * 180.0;
+    fi := list[vec[f32,3]]{};
+    mat0 := rdr.mat.rotate_deg(rdr.AXIS_Z, a0);
+    mat1 : vec[f32,4,4];
+
+    if (i <= (n-1)/2){
+      a1 := (i as f32)/((n-1)/2) * math.PI/3;
+      mat1 = rdr.mat.translate(4-r+r*math.cos(a1),r*math.sin(a1)*0.8,0);
+    }else{
+      a1 := ((i-(n-1)/2) as f32)/((n-1)/2) * math.PI/3 + math.PI*2/3;
+      mat1 = rdr.mat.translate(r-4+r*math.cos(a1),r*math.sin(a1)*0.8,0);
+    }
+    for (j:=0; j<f0.length(); j++){
+      v := (mat1 @* mat0 @* {...f0[j],1.}).xyzw;
+      fi.push(v.xyz/v.w);
+    }
+    ff.push(fi);
+  }
+  add_tube(mesh,ff);
+  return mesh;
+}
+
+func col2():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  prof := list[vec[f32,3]]{
+    {1,0,0.},
+    {2.5,0,0.},
+    {2.75,-0.25,0.},
+    {2.5,-0.5,0.},
+    {2.5,-1.0,0.},
+    {1.5,-2.5,0.},
+    {1.75,-2.75,0.},
+    {1.5,-3.0,0.},
+    {1.5,-11.0,0.},
+    {2.25,-11.5,0.},
+    {2.25,-12,0.},
+  }
+  for (i := 0; i < prof.length(); i++) prof[i] = prof[i].xyx;
+  add_vase(mesh,prof,4,0.,rdr.AXIS_Y);
+  for (i := 0; i < mesh.uvs.length(); i++){
+    mesh.uvs[i] = {
+      mesh.uvs[i].x,
+      1.0-mesh.vertices[i].y/-12.0
+    };
+  }
+  return mesh;
+}
+
+func col3_cap():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  f0 := list[vec[f32,3]]{
+    {-2.0,0,2.5},{2,0,2.5},{2.0,0,-2.5},{-2.0,0,-2.5}
+  }
+  add_face(mesh,f0);
+  add_extrusion(mesh,f0,{0.,-0.5,0});
+  add_backface(mesh,f0,{0.,-0.5,0});
+  prof := list[vec[f32,3]]{
+    {0.25,-11.0,0.},
+    {1.25,-11.0,0.},
+    {1.75,-11.5,0.},
+    {2.0,-11.5,0.},
+    {2.0,-12,0.},
+  }
+  for (i := 0; i < prof.length(); i++) prof[i] = prof[i].xyx;
+  add_vase(mesh,prof,4,0.,rdr.AXIS_Y);
+  return mesh;
+}
+
+func col3_volute():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  f1 := list[vec[f32,3]]{
+    {0.,-0.5,0.25},{0.0,-2.0,0.25},{1.0,-2.0,0.25},
+    {1.25,-1.75,0.25}, {1.5,-1.75,0.25}, {1.75,-1.5,0.25}, {1.75,-1.25,0.25},
+    {2.0,-1.0,0.25},{2.0,-0.5,0.25}
+  }
+  for (i := 0; i < 4; i++){
+    fi := list[vec[f32,3]]{};
+    a := i*360/4.0;
+    mat := rdr.mat.rotate_deg(rdr.AXIS_Y, a);
+    for (j := 0; j < f1.length(); j++){
+      v := (mat @* {...f1[j],1.}).xyzw;
+      fi.push(v.xyz/v.w);
+    }
+    extw := (mat @* {0.,0,-0.5,1.0}).xyzw;
+    ext := extw.xyz/extw.w;
+    idx0 := mesh.uvs.length();
+    add_face(mesh,fi);
+    add_backface(mesh,fi,ext);
+    for (j := idx0; j < mesh.uvs.length(); j++){
+      mesh.uvs[j] = {
+        math.abs(mesh.uvs[j].x)/2.0*0.5,
+        (mesh.uvs[j].y+2.0)/1.5,
+      }
+    }
+    idx0 = mesh.uvs.length();
+    add_extrusion(mesh,fi,ext);
+    for (j := idx0; j < mesh.uvs.length(); j++){
+      mesh.uvs[j] = {
+        mesh.uvs[j].x*0.5+0.5,
+        mesh.uvs[j].y,
+      }
+    }
+  }
+  return mesh;
+}
+
+func col3():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  prof := list[vec[f32,3]]{
+    {1.25,0,0.},
+    {1.25,-0.5,0.},
+    {0.8,-1.0,0.},
+    {0.6,-1.5,0.},
+    {0.8,-1.5,0.},
+    {0.8,-1.75,0.},
+    {0.6,-1.75,0.},
+    {0.65,-3.0,0.},
+    {1.0,-7.5,0.},
+    {1.0,-8.5,0.},
+    {0.85,-9.5,0.},
+    {0.55,-10.0,0.},
+    {0.75,-10.25,0.},
+    {0.85,-10.5,0.},
+  }
+  for (i := 0; i < prof.length(); i++) prof[i] = prof[i].xyx;
+  add_vase(mesh,prof,14,0.,rdr.AXIS_Y);
+  for (i := 0; i < mesh.uvs.length(); i++){
+    mesh.uvs[i] = {
+      mesh.uvs[i].x,
+      1.0-mesh.vertices[i].y/-10.5
+    };
+  }
+  smooth_tube_lon(mesh,14,prof.length());
+  smooth_tube_lat(mesh,14,prof.length());
+  return mesh;
+}
+
+
+func arch3a():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  f0 := list[vec[f32,3]]{};
+  f0.push({10,10.,2.0});
+  f0.push({0,10.,2.0});
+  f0.push({0,4.,2.0});
+  f0.push({2.,4.,2.0});
+  f0.push({2.,0.,2.0});
+  f0.push({10,0.,2.0});
+  add_face(mesh,f0);
+  add_extrusion(mesh,f0,{0.,0.,-4.});
+  add_backface(mesh,f0,{0.,0.,-4.});
+
+  f1 := list[vec[f32,3]]{};
+  f1.push({0,20.,2.0});
+  f1.push({0,15.,2.0});
+  n := 5;
+  for (i := 0; i < n; i++){
+    a0 := math.PI*1.0 - (i as f32)/(n-1) * math.PI*0.5;
+    f1.push({
+      10+2*math.cos(a0),
+      15+2*math.sin(a0),
+      2.0
+    });
+  }
+  f1.push({10,20.,2.0});
+  add_face(mesh,f1);
+  add_extrusion(mesh,f1,{0.,0.,-4.});
+  add_backface(mesh,f1,{0.,0.,-4.});
+
+  f2 := list[vec[f32,3]]{};
+  f2.push({0,10.,2.0});
+  f2.push({10,10.,2.0});
+  for (i := 0; i < n; i++){
+    a0 := math.PI*1.5 - (i as f32)/(n-1) * math.PI*0.5;
+    f2.push({
+      10+2*math.cos(a0),
+      15+2*math.sin(a0),
+      2.0
+    });
+  }
+  f2.push({0,15.,2.0});
+  add_face(mesh,f2);
+  add_extrusion(mesh,f2,{0.,0.,-4.});
+  add_backface(mesh,f2,{0.,0.,-4.});
+  return mesh;
+}
+
+func arch3b():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  f0 := list[vec[f32,3]]{};
+  f0.push({10,20.,2.0});
+  f0.push({0,20.,2.0});
+  f0.push({0,4.,2.0});
+  f0.push({2.,4.,2.0});
+  f0.push({2.,0.,2.0});
+  f0.push({10,0.,2.0});
+  add_face(mesh,f0);
+  add_extrusion(mesh,f0,{0.,0.,-4.});
+  add_backface(mesh,f0,{0.,0.,-4.});
+  return mesh;
+}
+
+func arch3_edge1():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  ff := list[list[vec[f32,3]]]{}
+  f0 := list[vec[f32,3]]{
+    {1.0,0.,0.},
+    {0.5,0.,2.5},{0.0,0.,2.5},{-0.5,0.,2.1},{-1.0,0.,2.1},
+    {-1.0,0.,-2.1},{0.0,0.,-2.5}
+  };
+
+  mat1 := rdr.mat.translate(2.,0,0);
+  mat2 := rdr.mat.translate(2.,4,0) @* rdr.mat.rotate_deg(rdr.AXIS_Z, 45) @* rdr.mat.scale(1.414,1.,1.);
+  mat3 := rdr.mat.translate(-2.,4,0) @* rdr.mat.rotate_deg(rdr.AXIS_Z, 135) @* rdr.mat.scale(1.414,1.,1.);
+  mat4 := rdr.mat.translate(-2.,0,0) @* rdr.mat.rotate_deg(rdr.AXIS_Z, 180);
+
+  f1 := list[vec[f32,3]]{};
+  for (j:=0; j<f0.length(); j++){
+    v := (mat1 @* {...f0[j],1.}).xyzw;
+    f1.push(v.xyz/v.w);
+  }
+  f2 := list[vec[f32,3]]{};
+  for (j:=0; j<f0.length(); j++){
+    v := (mat2 @* {...f0[j],1.}).xyzw;
+    f2.push(v.xyz/v.w);
+  }
+  f3 := list[vec[f32,3]]{};
+  for (j:=0; j<f0.length(); j++){
+    v := (mat3 @* {...f0[j],1.}).xyzw;
+    f3.push(v.xyz/v.w);
+  }
+  f4 := list[vec[f32,3]]{};
+  for (j:=0; j<f0.length(); j++){
+    v := (mat4 @* {...f0[j],1.}).xyzw;
+    f4.push(v.xyz/v.w);
+  }
+
+  ff.push(f1);
+  ff.push(f2);
+  ff.push(f3);
+  ff.push(f4);
+  
+  add_tube(mesh,ff);
+  return mesh;
+}
+
+func ledge1(end:i32):rdr.Mesh{
+  mesh := rdr.Mesh{};
+  f0 := list[vec[f32,3]]{
+    {0.0,0,3.5},
+    {0.0,-0.5,3.5},
+    {0.0,-1.0,3},
+    {0.0,-1.0,-2.5},
+    {0.0,0.0,-2.5}
+  }
+  ff := list[list[vec[f32,3]]]{};
+  mat0 : vec[f32,4,4];
+  mat1 : vec[f32,4,4];
+  if (end&2){
+    mat0 = rdr.mat.translate(10,0,0) @* rdr.mat.rotate_deg(rdr.AXIS_Y, -45) @* rdr.mat.scale(1,1,1.414);
+  }else{
+    mat0 = rdr.mat.translate(10,0,0)
+  }
+  if (end&1){
+    mat1 = rdr.mat.translate(-10,0,0) @* rdr.mat.rotate_deg(rdr.AXIS_Y,45) @* rdr.mat.scale(1,1,1.414);
+  }else{
+    mat1 = rdr.mat.translate(-10,0,0)
+  }
+  f1 := list[vec[f32,3]]{};
+  for (j:=0; j<f0.length(); j++){
+    v := (mat0 @* {...f0[j],1.}).xyzw;
+    f1.push(v.xyz/v.w);
+  }
+  f2 := list[vec[f32,3]]{};
+  for (j:=0; j<f0.length(); j++){
+    v := (mat1 @* {...f0[j],1.}).xyzw;
+    f2.push(v.xyz/v.w);
+  }
+  ff.push(f1);
+  ff.push(f2);
+  add_tube(mesh,ff);
+  return mesh;
+}
+
+func arch3_edge2():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  ff := list[list[vec[f32,3]]]{}
+  f0 := list[vec[f32,3]]{
+    {0.75,0.,0.},
+    {0.5,0.,2.5},{0.25,0.,2.5},{0.0,0.,2.1},{-0.5,0.,2.1},
+    {-0.5,0.,-2.1},{0.0,0.,-2.5}
+  };
+  n := 14;
+  for (i:=0; i < n; i++){
+    a0 := i/((n-1) as f32) * 360;
+    fi := list[vec[f32,3]]{};
+    mat := rdr.mat.rotate_deg(rdr.AXIS_Z, a0) @* rdr.mat.translate(2,0,0);
+    for (j:=0; j<f0.length(); j++){
+      v := (mat @* {...f0[j],1.}).xyzw;
+      fi.push(v.xyz/v.w);
+    }
+    ff.push(fi);
+  }
+  add_tube(mesh,ff);
+
+  f1 := list[vec[f32,3]]{
+    {2.,2,1.5},
+    {0.,2,1.5},
+    {0.,1.5,1.5},
+    {0.5,1.0,1.5},
+    {0.5,0.5,1.5},
+    {1.0,0.5,1.5},
+    {1.5,0.0,1.5},
+    {2.,0,1.5},
+  };
+  for (i := 0; i < 4; i++){
+    fi := list[vec[f32,3]]{};
+    a := i*360/4.0;
+    mat := rdr.mat.rotate_deg(rdr.AXIS_Z, a);
+    for (j := 0; j < f1.length(); j++){
+      v := (mat @* {...f1[j],1.}).xyzw;
+      fi.push(v.xyz/v.w);
+    }
+    extw := (mat @* {0.,0,-1.0,1.0}).xyzw;
+    ext := extw.xyz/extw.w;
+    add_face(mesh,fi);
+    add_extrusion(mesh,fi,ext);
+    add_backface(mesh,fi,ext);
+  }
+  return mesh;
+}
+
+func roof1():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  ff := list[list[vec[f32,3]]]{}
+  f0 := list[vec[f32,3]]{
+    {0,0,23.5},{0,1,23.5},{0,20,-10.},{0,0,-10.},
+  };
+  mat1 := rdr.mat.id;
+  mat2 := rdr.mat.translate(20,0,0);
+
+  f1 := list[vec[f32,3]]{};
+  for (j:=0; j<f0.length(); j++){
+    v := (mat1 @* {...f0[j],1.}).xyzw;
+    f1.push(v.xyz/v.w);
+  }
+  f2 := list[vec[f32,3]]{};
+  for (j:=0; j<f0.length(); j++){
+    v := (mat2 @* {...f0[j],1.}).xyzw;
+    f2.push(v.xyz/v.w);
+  }
+
+  ff.push(f1);
+  ff.push(f2);
+
+  add_tube(mesh,ff);
+
+  for (i := 0; i < mesh.uvs.length(); i++){
+    ab := (i % 12) >= 6;
+    if (ab){
+      mesh.uvs[i] = mesh.vertices[i].xz;
+    }else{
+      mesh.uvs[i] = mesh.vertices[i].xy;
+    }
+  }
+  return mesh;
+}
+
+func wall1():rdr.Mesh{
+  h := 78.5;
+  mesh := rdr.Mesh{};
+  f0 := list[vec[f32,3]]{
+    {0.,h,0.0},
+    {0.,0.,0.0},
+    {20.0,0.,0.0},
+    {20.0,h,0.0},
+  }
+  add_face(mesh, f0);
+  add_extrusion(mesh, f0, {0.,0.,-4.});
+  add_backface(mesh, f0, {0.,0.,-4.});
+
+  return mesh;
+}
+
+func wall2():rdr.Mesh{
+  h := 78.5;
+  n := 5;
+  mesh := rdr.Mesh{};
+  f0 := list[vec[f32,3]]{
+    {0.,h,0.0},
+    {0.,0,0.0},
+    {5.,0,0.0},
+  };
+  for (i := 0; i < n; i++){
+    a0 := math.PI - i/((n-1) as f32) * math.PI/2;
+    f0.push({
+      10+math.cos(a0)*5,
+      12+math.sin(a0)*5,
+      0.0
+    })
+  }
+  f0.push({10.0,h,0.0})
+
+  f1 := list[vec[f32,3]]{
+    {20.,h,0.0},
+    {10.,h,0.0},
+  };
+  for (i := 0; i < n; i++){
+    a0 := math.PI/2 - i/((n-1) as f32) * math.PI/2;
+    f1.push({
+      10+math.cos(a0)*5,
+      12+math.sin(a0)*5,
+      0.0
+    })
+  }
+  f1.push({15.,0,0.0});
+  f1.push({20.,0,0.0});
+  
+
+  add_face(mesh, f0);
+  add_extrusion(mesh, f0, {0.,0.,-4.});
+  add_backface(mesh, f0, {0.,0.,-4.});
+  add_face(mesh, f1);
+  add_extrusion(mesh, f1, {0.,0.,-4.});
+  add_backface(mesh, f1, {0.,0.,-4.});
+  return mesh;
+}
+
+
+func wall2_edge():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  ff := list[list[vec[f32,3]]]{}
+  f0 := list[vec[f32,3]]{
+    {7.0,0.,0.},
+    {6.5,0.,0.5},{6.0,0.,0.5},{5.0,0.,0.1},{4.5,0.,0.1},
+    {4.5,0.,-2},{4.5,0.,-4},{4.5,0.,-6},{4.5,0.,-8},
+    {4.5,0.,-9.5},{5.0,0.,-10}
+  };
+  n := 10;
+  m := 5;
+  for (i := 0; i < m; i++){
+    a0 := i/(m as f32) * 12;
+    fi := list[vec[f32,3]]{};
+    mat := rdr.mat.translate(0,a0-12,0);
+    for (j:=0; j<f0.length(); j++){
+      v := (mat @* {...f0[j],1.}).xyzw;
+      fi.push(v.xyz/v.w);
+    }
+    ff.push(fi);
+  }
+  for (i:=0; i < n; i++){
+    a0 := i/((n-1) as f32) * 180.0;
+    fi := list[vec[f32,3]]{};
+    mat := rdr.mat.rotate_deg(rdr.AXIS_Z, a0);
+    for (j:=0; j<f0.length(); j++){
+      v := (mat @* {...f0[j],1.}).xyzw;
+      fi.push(v.xyz/v.w);
+    }
+    ff.push(fi);
+  }
+  for (i := 0; i < m; i++){
+    a0 := (i+1)/(m as f32) * 12;
+    fi := list[vec[f32,3]]{};
+    mat := rdr.mat.translate(0,-a0,0)@*rdr.mat.rotate_deg(rdr.AXIS_Z,180);
+    for (j:=0; j<f0.length(); j++){
+      v := (mat @* {...f0[j],1.}).xyzw;
+      fi.push(v.xyz/v.w);
+    }
+    ff.push(fi);
+  }
+  add_tube(mesh,ff);
+  return mesh;
+}
+
+func arch1_corner():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  f0 := list[vec[f32,3]]{
+    {-2,0,-2},{-2,15,-2},{0,15,-2},{0,0,-2}
+  }
+  f1 := list[vec[f32,3]]{
+    {-2,0,-2},{-2,0,0},{-2,15,0},{-2,15,-2}
+  }
+  add_face(mesh,f0);
+  add_face(mesh,f1);
+  return mesh;
+}
+
+func drape1():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  n0 := 20;
+  m := 20;
+
+  ff := list[list[vec[f32,3]]]{};
+  fg := list[list[vec[f32,3]]]{};
+
+  rot90 := rdr.mat.rotate_deg(rdr.AXIS_X, 90);
+  for (i := 0; i < 20; i++){
+    mat0 : vec[f32,4,4];
+    w := i?0.1:0;
+    if (i < 5){
+      mat0 = rdr.mat.translate(0,-5+i,-6.5);
+    }else if (i < 10){
+      a0 := ((i-5) as f32)/5 * 90.0;
+      mat0 = rdr.mat.translate(0,0,-6) @* rdr.mat.rotate_deg(rdr.AXIS_X, a0) @* rdr.mat.translate(0,0,-0.5);
+    }else if (i < 15){
+      mat0 = rdr.mat.translate(0,0.5,-6+(i-10)*6.0/5.0) @* rot90;
+    }else{
+      a0 := 90+((i-15) as f32)/5 * 90.0;
+      mat0 = rdr.mat.translate(0,0,-0.5) @* rdr.mat.rotate_deg(rdr.AXIS_X, a0) @* rdr.mat.translate(0,0,-0.5);
+    }
+    fi := list[vec[f32,3]]{};
+    fj := list[vec[f32,3]]{};
+
+    for (j := 0; j < m; j++){
+      a1 := (j as f32)/m * math.PI*2 + math.PI;
+      v := {
+        math.cos(a1)*2.2;
+        0.0;
+        math.sin(a1)*w;
+        1.0
+      };
+      u := (mat0 @* v).xyzw;
+      fi.push(u.xyz/u.w+{-5.,0,0});
+      fj.push({5-u.x/u.w,u.y/u.w,u.z/u.w});
+    }
+    ff.push(fi);
+    fg.push(fj);
+  }
+
+  for (i := 0; i < n0; i++){
+    a0 := 180.+(i as f32)/(n0-1) * 180.0;
+    mat := rdr.mat.rotate_deg(rdr.AXIS_Z, a0);
+    fi := list[vec[f32,3]]{};
+    for (j := 0; j < m; j++){
+      a1 := (j as f32)/m * math.PI*2;
+      v := {
+        5+math.cos(a1)*2.2;
+        0.0;
+        math.sin(a1)*0.1;
+        1.0
+      };
+      u := (mat @* v).xyzw;
+      fi.push(u.xyz/u.w);
+    }
+    ff.push(fi);
+  }
+
+  for (i := fg.length()-1; i >= 0; i--){
+    ff.push(fg[i]);
+  }
+
+  for (i := 0; i < ff.length(); i++){
+    r := 1.0;
+    if (i < 8){
+      r = i/8.0;
+    }
+    if (i > ff.length()-8){
+      r = (ff.length()-i)/8.0;
+    }
+    for (j := 0; j < ff[i].length(); j++){
+      ({x,y,z}) := ff[i][j];
+      t := (y+6.1)/(6.7);
+      s := math.abs(x)/6.1;
+      dz := 0.0;
+      if (x < 0){
+        dz = math.cos((x+y*0.5)*math.PI)*0.25*math.sin(t*math.PI)*math.sin(s*math.PI)
+      }else{
+        dz = math.cos((-x+y*0.8)*math.PI)*0.2*math.sin(t*math.PI)*math.sin(s*math.PI)
+      }
+      ff[i][j] += {
+        0.0,
+        -math.cos(x*math.PI)*0.1*t - (1-t),
+        dz * r,
+      };
+
+    }
+  }
+
+  add_tube(mesh,ff);
+  smooth_tube_lon(mesh,m,n0+40);
+  smooth_tube_lat(mesh,m,n0+40);
+  // mesh.mode = rdr.MODE_LINE_LIST;
+  return mesh;
+}
+
+
+func drape2():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  ff := list[list[vec[f32,3]]]{};
+
+  m := 64;
+  n := 16;
+  for (i := 0; i < n; i++){
+    a0 := (i as f32)/(n-1);
+    fi := list[vec[f32,3]]{};
+    w := 0.15;
+    if (i==0 || i==n-1) w = 0.0;
+    for (j := 0; j < m; j++){
+      a1 := -(j as f32)/m * math.PI*2;
+      v := {
+        math.cos(a1)*(6.0-a0*a0*0.2),
+        -a0* 16.0,
+        math.sin(a1)*w,
+      }
+      fi.push(v);
+    }
+    ff.push(fi);
+  }
+ 
+
+  for (i := 0; i < ff.length(); i++){
+    r := 1.0;
+    if (i < 8){
+      r = i/8.0;
+    }
+    if (i > ff.length()-8){
+      r = (ff.length()-i)/8.0;
+    }
+    for (j := 0; j < ff[i].length(); j++){
+      ({x,y,z}) := ff[i][j];
+      t := -y/16.0;
+      s := (x+6.0)/12.0;
+      ff[i][j] += {
+        0.0,
+        math.cos(1.1*x*math.PI)*0.15 * (1-t) - math.sin(s*math.PI)*t*0.25,
+        math.sin(1.1*(x+y*0.05)*math.PI)*(0.3-s*0.25) * (1-t) + math.sin(0.6*(x-y*0.05)*math.PI)*(0.05+s*0.45) * t,
+      };
+      ff[i][j] *= {math.min(t,0.02)+0.98,1.0,1.0};
+    }
+  }
+  add_tube(mesh,ff);
+  smooth_tube_lon(mesh,m,n);
+  smooth_tube_lat(mesh,m,n);
+  // mesh.mode = rdr.MODE_LINE_LIST;
+  return mesh;
+}
+
+func pole1():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  prof := list[vec[f32,3]]{
+    {8,0.45,0.},
+    {6.8,0.45,0.},
+    {6.8,0.35,0.},
+    {6.5,0.35,0.},
+    {6.5,0.2,0.},
+    {-6.5,0.2,0.},
+    {-6.5,0.35,0.},
+    {-6.8,0.35,0.},
+    {-6.8,0.45,0.},
+    {-8,0.45,0.},
+  }
+  add_vase(mesh,prof,10,0.,rdr.AXIS_X);
+  for (i := 0; i < mesh.uvs.length(); i++){
+    mesh.uvs[i] = {
+      mesh.uvs[i].x,
+      (mesh.vertices[i].x+8.0)/16.0
+    };
+  }
+  smooth_tube_lat(mesh,10,prof.length());
+  return mesh;
+}
+
+func pole2():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  n := 10;
+
+  proe := list[vec[f32,3]]{
+    {0.0001,0.0,7.5},
+    {0.1,0.0,7.5},
+    {0.3,0.0,6.5},
+    {0.2,0.0,6.0},
+    {0.2,0.0,0.0},
+  }
+  ff := list[list[vec[f32,3]]]{};
+  for (i := 0; i < proe.length(); i++){
+    f := list[vec[f32,3]]{};
+    ff.push(f);
+  }
+  m0 := rdr.mat.translate(0,-0.125,0) @* rdr.mat.rotate_deg(rdr.AXIS_X,-15);
+  for (i := 0; i < n; i++){
+    a := i/(n as f32) * 360.0;
+    m := m0 @* rdr.mat.rotate_deg(rdr.AXIS_Z,a);
+    for (j := 0; j < proe.length(); j++){
+      v := (m @* {...proe[j],1.}).xyzw;
+      ff[j].push(v.xyz/v.w);
+    }
+  }
+  add_tube(mesh,ff);
+
+  for (i := 0; i < mesh.uvs.length(); i++){
+    mesh.uvs[i] = {
+      mesh.uvs[i].x,
+      (mesh.vertices[i].z)/7.5
+    };
+  }
+
+  smooth_tube_lat(mesh,n,proe.length());
+
+  prof := list[vec[f32,3]]{
+    {0.1,0.0,0.5},
+    {0.35,0.0,0.5},
+    {0.35,0.0,0.25},
+    {0.5,0.0,0.25},
+    {0.5,0.0,0.},
+  }
+  add_vase(mesh,prof,n,0.,rdr.AXIS_Z);
+    
+  return mesh;
+}
+
+mesh_arch1 := arch1();
+mesh_arch1_edge := arch1_edge();
+mesh_col1_cap := col1_cap();
+mesh_col1 := col1();
+mesh_ceil1 := ceil1();
+mesh_ceil1_corner := ceil1_corner();
+mesh_arch2a := arch2(5.5);
+mesh_arch2b := arch2(4.5);
+mesh_arch2_edge := arch2_edge();
+mesh_col2 := col2();
+mesh_col3_cap := col3_cap();
+mesh_col3_volute := col3_volute();
+mesh_col3 := col3();
+mesh_arch3a := arch3a();
+mesh_arch3b := arch3b();
+mesh_arch3_edge1 := arch3_edge1();
+mesh_arch3_edge2 := arch3_edge2();
+mesh_ledge1a := ledge1(0);
+mesh_ledge1b := ledge1(1);
+mesh_ledge1c := ledge1(2);
+mesh_ledge1d := ledge1(3);
+mesh_arch1_corner := arch1_corner();
+mesh_drape1 := drape1();
+mesh_drape2 := drape2();
+mesh_pole1 := pole1();
+mesh_pole2 := pole2();
+mesh_wall1 := wall1();
+mesh_wall2 := wall2();
+mesh_wall2_edge := wall2_edge();
+mesh_roof1 := roof1();
+
+mesh_floor2 := rdr.Mesh{};
+add_face(mesh_floor2, list[vec[f32,3]]{
+  {0.,26.5,0.},
+  {0.,26.5,20},
+  {20,26.5,20},
+  {20,26.5,0.},
+});
+
+piece_map := dict[rdr.Mesh, Piece]{};
+
+nav_map := arr.make[u8,3]({MAP_H*12, MAP_W*12, 4}, 255 as u8)
+
+func put_piece(mesh: rdr.Mesh, matl:i32, trfm:vec[f32,4,4]){
+  if (piece_map.has(mesh)){
+    piece_map[mesh].trfm.push(trfm);
+  }else{
+    piece_map[mesh] = Piece{
+      mesh: mesh, matl: matl, trfm: list[vec[f32,4,4]]{trfm}
+    }
+  }
+}
+
+foot1 := arr[u8,2]{
+  0,0,1,1,1,1;
+  0,0,1,1,1,1;
+  0,0,0,0,0,0;
+  0,0,0,0,0,0;
+  0,0,0,0,0,0;
+  0,0,1,0,0,0;
+}
+
+foot2 := arr[u8,2]{
+  1,1,1,1,1,1;
+  1,1,1,1,1,1;
+  1,1,0,0,0,0;
+  1,1,0,0,0,0;
+  1,1,0,0,0,0;
+  1,1,0,0,0,0;
+}
+
+foot4 := arr[u8,2]{
+  0,0,0,0,0,0;
+  0,0,0,0,0,0;
+  0,0,0,0,0,0;
+  0,0,0,0,0,0;
+  0,0,0,0,0,0;
+  0,0,0,1,1,1;
+}
+foot5 := arr[u8,2]{
+  0,0,1,0,0,1;
+  0,0,1,0,0,1;
+  0,0,0,0,0,0;
+  0,0,0,0,0,0;
+  0,0,0,0,0,0;
+  0,0,1,0,0,0;
+}
+
+
+
+func footprint(foot:arr[u8,2],trfm:vec[f32,4,4]){
+  for (i := 0; i < 6; i++){
+    for (j := 0; j < 6; j++){
+      if (foot[i,j]==1){
+        x := (j-2) * 5.0 + 0.001;
+        z := (i-2) * 5.0 + 0.001;
+        v := trfm @* {x;0.0;z;1.0};
+
+        xx := (v.x / v.w / 5.0) as i32;
+        zz := (v.z / v.w / 5.0) as i32;
+        nav_map[zz,xx,0] = 0;
+      }
+    }
+  }
+}
+
+func assembly1(trfm:vec[f32,4,4], end:i32){
+  footprint(foot1,trfm);
+
+  put_piece(
+    mesh_arch1, MATL_BRIK,
+    trfm @* rdr.mat.translate(10,14.5,20.)
+  );
+  put_piece(
+    mesh_arch1, MATL_BRIK,
+    trfm @* rdr.mat.translate(10,14.5,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_arch1_edge, (MATL_ARCH|9),
+    trfm @* rdr.mat.translate(10,14.5,20.)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,14.5,20.)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,14.5,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,14.5,-1.5) @* rdr.mat.scale(1.,1,-1)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,14.5,-1.5) @* rdr.mat.scale(-1.,1,-1)
+  );
+  put_piece(
+    mesh_col1_cap, MATL_CAP1,
+    trfm @* rdr.mat.translate(0.,14.5,20.)
+  );
+  put_piece(
+    mesh_col1_cap, MATL_CAP1,
+    trfm @* rdr.mat.translate(0.,14.5,-1.0)
+  );
+  put_piece(
+    mesh_col1, MATL_COL1,
+    trfm @* rdr.mat.translate(0.,12.0,20.)
+  );
+  put_piece(
+    mesh_arch2b, MATL_BRIK,
+    trfm @* rdr.mat.translate(5.5,42.5,20.)
+  );
+  put_piece(
+    mesh_arch2a, MATL_BRIK,
+    trfm @* rdr.mat.translate(5.5,42.5,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_arch2a, MATL_BRIK,
+    trfm @* rdr.mat.translate(14.5,42.5,20.)
+  );
+  put_piece(
+    mesh_arch2b, MATL_BRIK,
+    trfm @* rdr.mat.translate(14.5,42.5,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_arch2_edge, (MATL_ARCH|10),
+    trfm @* rdr.mat.translate(5.5,42.5,20.)
+  );
+  put_piece(
+    mesh_arch2_edge, (MATL_ARCH|10),
+    trfm @* rdr.mat.translate(14.5,42.5,20.)
+  );
+  put_piece(
+    mesh_col2, MATL_COL2,
+    trfm @* rdr.mat.translate(0.,42.5,20.)
+  );
+  put_piece(
+    mesh_col3_cap,  MATL_CAP1,
+    trfm @* rdr.mat.translate(10.,42.5,20.)
+  );
+  put_piece(
+    mesh_col3_volute,  MATL_VOLU,
+    trfm @* rdr.mat.translate(10.,42.5,20.)
+  );
+  put_piece(
+    mesh_col3,  MATL_COL3,
+    trfm @* rdr.mat.translate(10.,42,20.)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,42,20.)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,42,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,42,-1.5) @* rdr.mat.scale(1.,1,-1)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,42,-1.5) @* rdr.mat.scale(-1.,1,-1)
+  );
+  put_piece(
+    mesh_col1_cap, MATL_CAP1,
+    trfm @* rdr.mat.translate(0.,42,-1.0)
+  );
+  mesh_ledge : rdr.Mesh;
+  if (end == 0){
+    mesh_ledge = mesh_ledge1a;
+  }else if (end == 1){
+    mesh_ledge = mesh_ledge1b;
+  }else if (end == 2){
+    mesh_ledge = mesh_ledge1c;
+  }else{
+    mesh_ledge = mesh_ledge1d;
+  }
+  put_piece(
+    mesh_ledge, MATL_LEDG,
+    trfm @* rdr.mat.translate(10,30.5,20.)
+  );
+  put_piece(
+    mesh_wall1, MATL_BRIK,
+    trfm
+  )
+  put_piece(
+    mesh_roof1, MATL_ROOF,
+    trfm @* rdr.mat.translate(0,78.5,0)
+  )
+  put_piece(
+    mesh_floor2, MATL_TILE,
+    trfm
+  );
+}
+
+func assembly2(trfm:vec[f32,4,4], is_gnd:i32){
+  footprint(foot2,trfm);
+  put_piece(
+    mesh_ceil1_corner, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,14.5,20.)
+  );
+  put_piece(
+    mesh_ceil1_corner, MATL_CEIL,
+    trfm @* rdr.mat.translate(8.5,14.5,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_ceil1_corner, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,14.5,-1.5) @* rdr.mat.scale(1.,1,-1)
+  );
+  put_piece(
+    mesh_ceil1_corner, MATL_CEIL,
+    trfm @* rdr.mat.translate(8.5,14.5,-1.5) @* rdr.mat.scale(-1.,1,-1)
+  );
+  put_piece(
+    mesh_col1_cap, MATL_CAP1,
+    trfm @* rdr.mat.translate(-1.0,14.5,-1.0)
+  );
+  put_piece(
+    mesh_col1_cap, MATL_CAP1,
+    trfm @* rdr.mat.translate(-1.0,14.5,19.625)
+  );
+  put_piece(
+    mesh_arch1_corner, MATL_BRIK,
+    trfm @* rdr.mat.translate(20,14.5,20)
+  );
+  if (is_gnd){
+    put_piece(
+      mesh_wall1, MATL_BRIK,
+      trfm
+    )
+    put_piece(
+      mesh_wall1, MATL_BRIK,
+      trfm @* rdr.mat.translate(-4,0,0) @* rdr.mat.rotate_deg(rdr.AXIS_Y,-90)
+    )
+    put_piece(
+      mesh_floor2, MATL_TILE,
+      trfm
+    );
+  }else{
+    put_piece(
+      mesh_roof1, MATL_ROOF,
+      trfm @* rdr.mat.translate(0,51,0)
+    )
+    put_piece(
+      mesh_roof1, MATL_ROOF,
+      trfm @* rdr.mat.translate(0,51,20) @* rdr.mat.rotate_deg(rdr.AXIS_Y,90)
+    )
+  }
+}
+
+func assembly3(trfm:vec[f32,4,4], end:i32){
+  put_piece(
+    (end&2)?mesh_arch3b:mesh_arch3a, MATL_BRIK,
+    trfm @* rdr.mat.translate(10,0.,20.)
+  );
+  put_piece(
+    (end&1)?mesh_arch3b:mesh_arch3a, MATL_BRIK,
+    trfm @* rdr.mat.translate(10,0.,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_arch3_edge1, (MATL_ARCH|3),
+    trfm @* rdr.mat.translate(10,0.,20.)
+  );
+  mesh_ledge : rdr.Mesh;
+  if (end == 0){
+    mesh_ledge = mesh_ledge1a;
+  }else if (end == 1){
+    mesh_ledge = mesh_ledge1b;
+  }else if (end == 2){
+    mesh_ledge = mesh_ledge1c;
+  }else{
+    mesh_ledge = mesh_ledge1d;
+  }
+  put_piece(
+    mesh_ledge,  MATL_LEDG,
+    trfm @* rdr.mat.translate(10,0.,20.)
+  );
+  if (!(end&1)){
+    put_piece(
+      mesh_arch3_edge2, (MATL_ARCH|7),
+      trfm @* rdr.mat.translate(0,15.,20.)
+    );
+  }
+}
+
+func assembly4(trfm:vec[f32,4,4], end:i32){
+  footprint(foot4,trfm);
+  if (!(end&1)){
+    put_piece(
+      mesh_drape1, MATL_FABR|0,
+      trfm @* rdr.mat.translate(0.,30.2,23.7)
+    );
+  }
+  put_piece(
+    mesh_drape2, MATL_FABR|1,
+    trfm @* rdr.mat.translate(10.,16.5,20)
+  );
+  put_piece(
+    mesh_pole1, MATL_POLE,
+    trfm @* rdr.mat.translate(10.,16.8,20)
+  );
+  put_piece(
+    mesh_pole2, MATL_POLE,
+    trfm @* rdr.mat.translate(10.,50.65,22)
+  );
+
+}
+
+func assembly5(trfm:vec[f32,4,4], end:i32){
+  footprint(foot5,trfm);
+  put_piece(
+    mesh_arch1, MATL_BRIK,
+    trfm @* rdr.mat.translate(10,14.5,20.)
+  );
+  put_piece(
+    mesh_arch1, MATL_BRIK,
+    trfm @* rdr.mat.translate(10,14.5,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_arch1_edge, (MATL_ARCH|9),
+    trfm @* rdr.mat.translate(10,14.5,20.)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,14.5,20.)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,14.5,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,14.5,-1.5) @* rdr.mat.scale(1.,1,-1)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,14.5,-1.5) @* rdr.mat.scale(-1.,1,-1)
+  );
+  put_piece(
+    mesh_col1_cap, MATL_CAP1,
+    trfm @* rdr.mat.translate(0.,14.5,20.)
+  );
+  put_piece(
+    mesh_col1_cap, MATL_CAP1,
+    trfm @* rdr.mat.translate(0.,14.5,-1.0)
+  );
+  put_piece(
+    mesh_col1, MATL_COL1,
+    trfm @* rdr.mat.translate(0.,12.0,20.)
+  );
+  put_piece(
+    mesh_arch2b, MATL_BRIK,
+    trfm @* rdr.mat.translate(5.5,42.5,20.)
+  );
+  put_piece(
+    mesh_arch2a, MATL_BRIK,
+    trfm @* rdr.mat.translate(5.5,42.5,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_arch2a, MATL_BRIK,
+    trfm @* rdr.mat.translate(14.5,42.5,20.)
+  );
+  put_piece(
+    mesh_arch2b, MATL_BRIK,
+    trfm @* rdr.mat.translate(14.5,42.5,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_arch2_edge, (MATL_ARCH|10),
+    trfm @* rdr.mat.translate(5.5,42.5,20.)
+  );
+  put_piece(
+    mesh_arch2_edge, (MATL_ARCH|10),
+    trfm @* rdr.mat.translate(14.5,42.5,20.)
+  );
+  put_piece(
+    mesh_col2, MATL_COL2,
+    trfm @* rdr.mat.translate(0.,42.5,20.)
+  );
+  put_piece(
+    mesh_col3_cap,  MATL_CAP1,
+    trfm @* rdr.mat.translate(10.,42.5,20.)
+  );
+  put_piece(
+    mesh_col3_volute,  MATL_VOLU,
+    trfm @* rdr.mat.translate(10.,42.5,20.)
+  );
+  put_piece(
+    mesh_col3,  MATL_COL3,
+    trfm @* rdr.mat.translate(10.,42,20.)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,42,20.)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,42,20.) @* rdr.mat.scale(-1.,1,1)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,42,-1.5) @* rdr.mat.scale(1.,1,-1)
+  );
+  put_piece(
+    mesh_ceil1, MATL_CEIL,
+    trfm @* rdr.mat.translate(10,42,-1.5) @* rdr.mat.scale(-1.,1,-1)
+  );
+  put_piece(
+    mesh_col1_cap, MATL_CAP1,
+    trfm @* rdr.mat.translate(0.,42,-1.0)
+  );
+  mesh_ledge : rdr.Mesh;
+  if (end == 0){
+    mesh_ledge = mesh_ledge1a;
+  }else if (end == 1){
+    mesh_ledge = mesh_ledge1b;
+  }else if (end == 2){
+    mesh_ledge = mesh_ledge1c;
+  }else{
+    mesh_ledge = mesh_ledge1d;
+  }
+  put_piece(
+    mesh_ledge, MATL_LEDG,
+    trfm @* rdr.mat.translate(10,30.5,20.)
+  );
+  put_piece(
+    mesh_wall2, MATL_BRIK,
+    trfm @* rdr.mat.translate(0,0,0)
+  )
+  put_piece(
+    mesh_wall2_edge, MATL_ARCH|15,
+    trfm @* rdr.mat.translate(10,12,0)
+  )
+  put_piece(
+    mesh_roof1, MATL_ROOF,
+    trfm @* rdr.mat.translate(0,78.5,0)
+  )
+  put_piece(
+    mesh_floor2, MATL_TILE,
+    trfm
+  );
+}
+
+func assembly134(trfm:vec[f32,4,4],end:i32){
+  assembly1(trfm@*rdr.mat.translate(0,0,0), end);
+  assembly3(trfm@*rdr.mat.translate(0,58.5,0), end);
+  assembly4(trfm@*rdr.mat.translate(0,0,0), end);
+}
+func assembly22(trfm:vec[f32,4,4]){
+  assembly2(trfm,1);
+  assembly2(trfm@*rdr.mat.translate(0,27.5,0),0);
+}
+func assembly13(trfm:vec[f32,4,4],end:i32){
+  assembly1(trfm@*rdr.mat.translate(0,0,0), end);
+  assembly3(trfm@*rdr.mat.translate(0,58.5,0), end);
+}
+func assembly53(trfm:vec[f32,4,4],end:i32){
+  assembly5(trfm@*rdr.mat.translate(0,0,0), end);
+  assembly3(trfm@*rdr.mat.translate(0,58.5,0), end);
+
+  if (!(end&1)){
+    put_piece(
+      mesh_drape1, MATL_FABR|0,
+      trfm @* rdr.mat.translate(0.,30.2,23.7)
+    );
+  }
+  put_piece(
+    mesh_pole2, MATL_POLE,
+    trfm @* rdr.mat.translate(10.,50.65,22)
+  );
+}
+
+func sponza(lvl_map:arr[u8,2]):list[Piece]{
+  h := 78.5;
+
+  mesh_floor1 := rdr.Mesh{};
+  add_face(mesh_floor1, list[vec[f32,3]]{
+    {0.,0.,0.},
+    {0.,0.,60*MAP_H},
+    {60*MAP_W,0.,60*MAP_H},
+    {60*MAP_W,0.,0.},
+  });
+  put_piece(
+    mesh_floor1, MATL_TILE,
+    rdr.mat.id
+  )
+
+  rot90 := rdr.mat.rotate_deg(rdr.AXIS_Y, 90);
+  rot180 := rdr.mat.rotate_deg(rdr.AXIS_Y, 180);
+  rot270 := rdr.mat.rotate_deg(rdr.AXIS_Y, 270);
+
+  for (i := 0; i < MAP_H; i++){
+    for (j := 0; j < MAP_W; j++){
+      if (lvl_map[i,j] == 1){
+        if (lvl_map[i-1,j] == 0){
+          end := lvl_map[i-1,j+1]==1;
+          assembly134(rdr.mat.translate(j*60+20,0,i*60+20)@*rot180, 0);
+          assembly134(rdr.mat.translate(j*60+40,0,i*60+20)@*rot180, 0);
+          assembly134(rdr.mat.translate(j*60+60,0,i*60+20)@*rot180, end);
+          if (end){
+            assembly22(rdr.mat.translate(j*60+80,0,i*60+20)@*rot180);
+          }
+        }
+        if (lvl_map[i+1,j] == 0){
+          end := lvl_map[i+1,j-1]==1;
+          assembly134(rdr.mat.translate(j*60,0,i*60+40), end);
+          assembly134(rdr.mat.translate(j*60+20,0,i*60+40), 0);
+          assembly134(rdr.mat.translate(j*60+40,0,i*60+40), 0);
+          if (end){
+            assembly22(rdr.mat.translate(j*60-20,0,i*60+40));
+          }
+        }
+        if (lvl_map[i,j+1] == 0){
+          end := lvl_map[i+1,j+1]!=0;
+          assembly13(rdr.mat.translate(j*60+40,0,i*60+20)@*rot90, 0);
+          assembly13(rdr.mat.translate(j*60+40,0,i*60+40)@*rot90, 0);
+          assembly13(rdr.mat.translate(j*60+40,0,i*60+60)@*rot90, end);
+          if (end){
+            assembly22(rdr.mat.translate(j*60+40,0,i*60+80)@*rot90);
+          }
+        }
+        if (lvl_map[i,j-1] == 0){
+          end := lvl_map[i-1,j-1]!=0;
+          assembly13(rdr.mat.translate(j*60+20,0,i*60+0) @*rot270, end);
+          assembly13(rdr.mat.translate(j*60+20,0,i*60+20)@*rot270, 0);
+          assembly13(rdr.mat.translate(j*60+20,0,i*60+40)@*rot270, 0);
+          if (end){
+            assembly22(rdr.mat.translate(j*60+20,0,i*60-20)@*rot270);
+          }
+        }
+
+      }else if (lvl_map[i,j] == 2){
+        if (lvl_map[i-1,j] == 0){
+          end := lvl_map[i-1,j+1]==1;
+          assembly134(rdr.mat.translate(j*60+20,0,i*60+20)@*rot180, 0);
+          assembly53(rdr.mat.translate(j*60+40,0,i*60+20)@*rot180, 0);
+          assembly134(rdr.mat.translate(j*60+60,0,i*60+20)@*rot180, end);
+          if (end){
+            assembly22(rdr.mat.translate(j*60+80,0,i*60+20)@*rot180);
+          }
+        }
+        if (lvl_map[i+1,j] == 0){
+          end := lvl_map[i+1,j-1]==1;
+          assembly134(rdr.mat.translate(j*60,0,i*60+40), end);
+          assembly53(rdr.mat.translate(j*60+20,0,i*60+40), 0);
+          assembly134(rdr.mat.translate(j*60+40,0,i*60+40), 0);
+          if (end){
+            assembly22(rdr.mat.translate(j*60-20,0,i*60+40));
+          }
+        }
+      }
+    }
+  }
+
+
+  // mesh_floorx := rdr.Mesh{};
+  // add_face(mesh_floorx, list[vec[f32,3]]{
+  //   {0.,0.,0.},
+  //   {0.,0.,4.9},
+  //   {4.9,0.,4.9},
+  //   {4.9,0.,0.},
+  // });
+  // for (i := 0; i < nav_map.shape()[0]; i++){
+  //   for (j := 0; j < nav_map.shape()[1]; j++){
+  //     if (nav_map[i,j,0] == 0){
+  //       put_piece(
+  //         mesh_floorx, MATL_ROOF,
+  //         rdr.mat.translate(j*5,0.01,i*5)
+  //       )
+  //     }
+  //   }
+  // }
+
+  pieces := piece_map.values();
+  pieces.sort(func(p:Piece):f32{
+    return p.matl as f32;
+  });
+
+  return pieces;
+}
+
+
+
+
+func compute_tbn(
+  Ng : vec[f32,3],
+  dpdx:vec[f32,3],dpdy:vec[f32,3],
+  dtdx:vec[f32,2],dtdy:vec[f32,2],
+):vec[f32,3,3]{
+  det := dtdx.x*dtdy.y - dtdy.x*dtdx.y;
+  T := dpdx * (dtdy.y/det) + dpdy * (-dtdx.y/det);
+  B := dpdx * (-dtdy.x/det) + dpdy * (dtdx.x/det);
+  T = (T - Ng * Ng.dot(T)).dir();
+  B = (B - Ng * Ng.dot(B)).dir();
+  N := T.cross(B).dir();
+  if (N.dot(Ng)<0.0){
+    N *= -1.;
+  }
+  return {
+    T.x, T.y, T.z;
+    B.x, B.y, B.z;
+    N.x, N.y, N.z;
+  }
+}
+func gradient(
+  htex:frag.Texture, uv:vec[f32,2], texel:vec[f32,2]
+):vec[f32,2]{
+  h  := htex.sample(uv).r;
+  hU := htex.sample({(uv.x+texel.x),uv.y}).r;
+  hV := htex.sample({uv.x,(uv.y+texel.y)}).r;
+  dhu := (hU - h) / texel.x;
+  dhv := (hV - h) / texel.y;
+  return {dhu,dhv};
+}
+
+func perturb(tbn:vec[f32,3,3], dhuv:vec[f32,2], scale:f32):vec[f32,3]{
+  T := {tbn[0,0],tbn[0,1],tbn[0,2]};
+  B := {tbn[1,0],tbn[1,1],tbn[1,2]};
+  N := {tbn[2,0],tbn[2,1],tbn[2,2]};
+  return (N - scale * (dhuv.x * T + dhuv.y * B)).dir();
+}
+
+uvdbg_material := frag.program(embed (func(
+  @varying uv:vec[f32,2]
+):vec[f32,4]{
+  x := math.abs(uv.x)%1.0;
+  y := math.abs(uv.y)%1.0;
+  return {x,y,0.5,1.0};
+}) as "fragment")
+
+tex_brick := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+  w0 := 0.5;
+  h0 := 0.25;
+  gx := uv.x*2.0;
+  gy := uv.y*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  if (gy > 1.0) gy = 2.0-gy;
+
+  g1 := rand.noise(
+    6.+8.*gy,
+    7.+8.*gx);
+
+  g2 := rand.noise(
+    9.+8.*gy,
+    10.+8.*gx);
+
+  gx += ((g1-0.5)*0.05)*math.sin(uv.x*math.PI*2);
+  gy += ((g2-0.5)*0.025)*math.sin(uv.y*math.PI*2);
+  g := rand.noise(
+    2.+2.*math.cos(gy*math.PI*2),
+    3.+2.*math.sin(gy*math.PI*2),
+    4.+8.*gx);
+
+  ab := (gy % (h0*2))/(h0*2);
+  dy := gy % h0;
+  dx := gx % w0;
+
+  if (dy < 0.02){
+    g *= dy/0.02;
+  }else if (dy > 0.23){
+    g *= (0.25-dy)/0.02;
+  }
+  if (ab < 0.5){
+    if (dx < 0.02){
+      g *= dx/0.02;
+    }else if (dx > 0.48){
+      g *= (0.5-dx)/0.02;
+    }
+  }else if (ab >= 0.5 && dx > 0.23 && dx < 0.27){
+    if (dx < 0.25){
+      g *= 1.0-(dx-0.23)/0.02;
+    }else{
+      g *= 1.0-(0.27-dx)/0.02;
+    }
+  }
+  return {g,g,1.0,1.0};
+}) as "fragment"), tex_brick);
+frag.render();
+frag.end();
+
+// func sigmoid(x:f32,k:f32):f32{
+//   return 1./(1.+math.exp(-k*(x-0.5)));
+// }
+
+func sigmoid(x:f32,a:f32):f32{
+  x = math.min(math.max(x,0.0),1.0);
+  a = 1.0-a;
+  y := 0.0;
+  if (x<=0.5){
+    y = ((2.0*x)**(1.0/a))/2.0;
+  } else {
+    y = 1.0 - ((2.0*(1.0-x))**(1.0/a))/2.0;
+  }
+  return y;
+}
+
+tex_tile := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+  w0 := 0.5;
+  h0 := 0.25;
+  gx := uv.x*2.0;
+  gy := uv.y*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  if (gy > 1.0) gy = 2.0-gy;
+
+  q := rand.noise(
+    2.+2.*math.cos(gy*math.PI*2),
+    3.+2.*math.sin(gy*math.PI*2),
+    4.+8.*gx);
+  q = sigmoid(q+0.2,0.4)*0.8+0.2;
+
+  g := 1.0;
+  ab := (gy % (h0*2))/(h0*2);
+  dy := gy % h0;
+  dx := gx % w0;
+
+  if (dy < 0.01){
+    g *= dy/0.01;
+  }else if (dy > 0.24){
+    g *= (0.25-dy)/0.01;
+  }
+  if (ab < 0.5){
+    if (dx < 0.01){
+      g *= dx/0.01;
+    }else if (dx > 0.49){
+      g *= (0.5-dx)/0.01;
+    }
+  }else if (ab >= 0.5 && dx > 0.24 && dx < 0.26){
+    if (dx < 0.25){
+      g *= 1.0-(dx-0.24)/0.01;
+    }else{
+      g *= 1.0-(0.26-dx)/0.01;
+    }
+  }
+  g = (g*0.5+0.5)*q;
+  return {g,g,1.0,1.0};
+}) as "fragment"), tex_tile);
+frag.render();
+frag.end();
+
+
+tex_noise := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+  gx := uv.x*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+
+  gy := uv.y*2.0;
+  if (gy > 1.0) gy = 2.0-gy;
+
+  return {
+    rand.noise(gx,gy),
+    rand.noise(gx*4,gy*4),
+    rand.noise(gx*16,gy*16),
+    1.0};
+  
+}) as "fragment"), tex_noise);
+frag.render();
+frag.end();
+
+tex_blank := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+):vec[f32,4]{
+  return {1.0,1.0,1.0,1.0}
+}) as "fragment"), tex_blank);
+frag.render();
+frag.end();
+
+
+tex_col1 := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gx := uv.x*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  gy := uv.y;
+  g := 1.0;
+  dy := gy % 0.25;
+
+  q := rand.noise(
+    2.+16.*gy,
+    4.+16.*gx);
+  q = sigmoid(q+0.2,0.6)*0.3+0.7;
+
+  if (dy < 0.01){
+    g *= dy/0.01;
+  }else if (dy > 0.24){
+    g *= (0.25-dy)/0.01;
+  }
+  g = (g*0.5+0.5)*q;
+  return {g,g,1.0,1.0};
+
+}) as "fragment"), tex_col1);
+frag.render();
+frag.end();
+
+
+tex_arch := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gx := uv.x*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  gy := uv.y;
+  g := 1.0;
+  dy := gy % 0.1;
+
+  q := rand.noise(
+    2.+64.*gy,
+    4.+16.*gx);
+  q = sigmoid(q+0.2,0.6)*0.3+0.7;
+
+  if (dy < 0.005){
+    g *= dy/0.005;
+  }else if (dy > 0.095){
+    g *= (0.1-dy)/0.005;
+  }
+  g = (g*0.3+0.7)*q;
+  return {g,g,1.0,1.0};
+
+}) as "fragment"), tex_arch);
+frag.render();
+frag.end();
+
+
+
+tex_col2 := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gx := uv.x*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  gy := uv.y;
+  g := 1.0;
+  dy := gy % 0.2;
+
+  q := rand.noise(
+    2.+32.*gy,
+    4.+16.*gx);
+  q = sigmoid(q+0.2,0.6)*0.3+0.7;
+
+  if (dy < 0.01){
+    g *= dy/0.01;
+  }else if (dy > 0.19){
+    g *= (0.2-dy)/0.01;
+  }
+  g = (g*0.3+0.7)*q;
+  return {g,g,1.0,1.0};
+
+}) as "fragment"), tex_col2);
+frag.render();
+frag.end();
+
+
+tex_ledge := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gy := uv.y*2.0;
+  if (gy > 1.0) gy = 2.0-gy;
+  gx := uv.x;
+  g := 1.0;
+  dx := gx % 0.2;
+
+  q := rand.noise(
+    2.+16.*gy,
+    4.+32.*gx);
+  q = sigmoid(q+0.2,0.6)*0.3+0.7;
+
+  if (dx < 0.01){
+    g *= dx/0.01;
+  }else if (dx > 0.19){
+    g *= (0.2-dx)/0.01;
+  }
+  g = (g*0.3+0.7)*q;
+  return {g,g,1.0,1.0};
+
+}) as "fragment"), tex_ledge);
+frag.render();
+frag.end();
+
+
+tex_ceil := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gy := uv.y;
+  gx := uv.x;
+
+  q := rand.noise(
+    2.+64.*gy,
+    4.+64.*gx);
+  q = sigmoid(q+0.3,0.8)*0.3+0.7;
+
+  g := 1.0;
+
+  g = (g*0.2+0.8)*q;
+  return {g,g,1.0,1.0};
+
+}) as "fragment"), tex_ceil);
+frag.render();
+frag.end();
+
+
+
+tex_slab := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gy := uv.y;
+  gx := uv.x;
+
+  q := rand.noise(
+    2.+32.*gy,
+    4.+128.*gx);
+  q = sigmoid(q+0.3,0.8)*0.3+0.7;
+
+  g := 1.0;
+
+  g = (g*0.2+0.8)*q;
+  return {g,g,1.0,1.0};
+
+}) as "fragment"), tex_slab);
+frag.render();
+frag.end();
+
+
+tex_volute := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gy := uv.y;
+  gx := uv.x;
+  g := 1.0;
+
+  if (gx < 0.5){
+    gx *= 2.;
+
+    dx := gx - 0.7;
+    dy := gy - 0.35;
+    d := (dx*dx+dy*dy)**0.5;
+    
+    if (d < 0.2){
+      g = math.sin(d*100.0)*0.5+0.5;
+    }else if (gy < 0.35){
+      g = math.sin((gx-gy*0.8)*80.0)*0.5+0.5;
+    }
+  }else{
+    gx = (gx-0.5)*0.25;
+  }
+
+  q := rand.noise(
+    2.+32.*gx,
+    4.+32.*gy);
+  q = sigmoid(q+0.2,0.8)*0.4+0.6;
+
+  g = g*q;
+
+  return {g,g,1.0,1.0};
+
+}) as "fragment"), tex_volute);
+frag.render();
+frag.end();
+
+
+tex_roof := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gx := uv.x*2.0;
+  gy := uv.y*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+  if (gy > 1.0) gy = 2.0-gy;
+
+  wav := math.cos(gx*16*math.PI);
+  g := wav*0.5+0.5;
+  q := rand.noise(
+    2.+32.*gy,
+    4.+32.*gx);
+  q = sigmoid(q+0.2,0.6)*0.3+0.7;
+
+  gy = uv.y + wav*0.005;
+
+  dy := gy % 0.2;
+  if (dy < 0.02){
+    g *= dy/0.02;
+  }else if (dy > 0.19){
+    g *= (0.2-dy)/0.01;
+  }
+  g = g*q;
+
+  return {g,g,1.0,1.0};
+
+}) as "fragment"), tex_roof);
+frag.render();
+frag.end();
+
+
+
+tex_drape1 := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+  gx := uv.x;
+  gy := uv.y;
+  q := rand.noise(
+    2.+32.*gy,
+    4.+64.*gx);
+  q = sigmoid(q,0.6)*0.05+0.95;
+
+  g := math.sin(uv.x*25.0)*0.2+0.5;
+  g *= q;
+
+  k := 1.0;
+  s := 0.0;
+  if (gx > 0.15 && gx < 0.2){
+    s = 1.0;
+    k = 0.6;
+  }
+  if (gx > 0.8 && gx < 0.85){
+    s = 1.0;
+    k = 0.6;
+  }
+  if (gx > 0.25 && gx < 0.4){
+    yy := (uv.y % 0.1 * 20);
+    if (yy > 1.0) yy = 2.0-yy;
+    p := rand.noise(
+      2.+10.*yy,
+      4.+40.*gx
+    );
+    p = sigmoid(p,0.95);
+    s = p;
+    k = 0.6+0.4*(1-p);
+  }
+  return {g,k,s,1.0};
+  
+}) as "fragment"), tex_drape1);
+frag.render();
+frag.end();
+
+
+
+tex_drape2 := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+  gx := uv.x;
+  gy := uv.y;
+  q := rand.noise(
+    2.+64.*gy,
+    4.+32.*gx);
+  q = sigmoid(q,0.6)*0.05+0.95;
+
+  g := math.sin(uv.x*25.0)*0.2+0.5;
+  g *= q;
+
+  k := 1.0;
+  s := 0.0;
+  if (gy > 0.95){
+    s = 1.0;
+    k = 0.6;
+  }
+  if (gy > 0.85 && gy < 0.92){
+    xx := (uv.x % 0.1 * 20);
+    if (xx > 1.0) xx = 2.0-xx;
+    p := rand.noise(
+      2.+10.*xx,
+      4.+40.*gy
+    );
+    p = sigmoid(p,0.95);
+    s = p;
+    k = 0.6+0.4*(1-p);
+  }
+  return {g,k,s,1.0};
+  
+}) as "fragment"), tex_drape2);
+frag.render();
+frag.end();
+
+
+
+
+tex_pole := frag.texture(512,512,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+
+  gy := uv.y;
+  gx := uv.x*2.0;
+  if (gx > 1.0) gx = 2.0-gx;
+
+  q := rand.noise(
+    2.+128.*gy,
+    4.+16.*gx);
+  q = sigmoid(q,0.5)*0.3+0.7;
+
+  g := 1.0;
+
+  g = (g*0.2+0.8)*q;
+  return {g,g,1.0,1.0};
+
+}) as "fragment"), tex_pole);
+frag.render();
+frag.end();
+
+
+phong_material := frag.program(embed (func(
+  @varying normal : vec[f32,3],
+  @varying position : vec[f32,3],
+  @uniform eye : vec[f32,3],
+  @uniform l_dir : vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform map_bump: frag.Texture,
+  @uniform map_noise: frag.Texture,
+  @uniform map_ao: frag.Texture,
+  @uniform map_shadow : frag.Texture,
+  @builtin frag_coord : vec[f32,4],
+  @derived d_position_dx : vec[f32,3],
+  @derived d_position_dy : vec[f32,3],
+  @derived d_uv_dx : vec[f32,2],
+  @derived d_uv_dy : vec[f32,2],
+  @uniform uv_scale : vec[f32,2],
+  @uniform uv_offset : vec[f32,2],
+  @uniform tint0 : vec[f32,3],
+  @uniform tint1 : vec[f32,3],
+  @uniform k_tint : f32,
+  @uniform shininess : f32,
+  @uniform bumpiness : f32,
+  @uniform col_ambi : vec[f32,3],
+  @uniform col_spec : vec[f32,3],
+  @uniform noise_lvl : i32,
+  @uniform bump2diff : f32,
+  @uniform shadow_matrix:vec[f32,4,4],
+  @uniform shadow_bias: f32,
+):vec[f32,4]{
+
+  ruv := (uv+uv_offset)*uv_scale;
+
+  texel := {0.001,0.001};
+  dhuv := gradient(map_bump,ruv,texel);
+  tbn := compute_tbn(
+    normal,
+    d_position_dx,d_position_dy,
+    d_uv_dx,d_uv_dy
+  );
+  nml := perturb(tbn,dhuv,bumpiness);
+
+  view_dir := eye - position;
+  half_vec := (l_dir + view_dir).dir();
+  ndl := math.max(nml.dot(l_dir),0.0);
+  ndh := math.max(nml.dot(half_vec),0.0);
+
+  g := 0.;
+  if (noise_lvl == 0){
+    g = map_noise.sample(ruv).x;
+  }else if (noise_lvl == 1){
+    g = map_noise.sample(ruv).y;
+  }else{
+    g = map_noise.sample(ruv).z;
+  }
+  g = sigmoid(g,k_tint);
+
+  tint := tint0 * (1.-g) + tint1 * g;
+
+  ao := map_ao.sample(ruv).xyz;
+
+  col := map_bump.sample(ruv);
+  diff := (col.g * bump2diff + (1.0-bump2diff)) * ao * ndl * tint;
+  ambi := (col.g * bump2diff + (1.0-bump2diff)) * ao * col_ambi * tint;
+  spec := col.b * col_spec * (ndh ** shininess);
+  color := diff+ambi+spec;
+
+  shadow_coord := (shadow_matrix @* {position.x,position.y,position.z,1.0}).xyzw;
+  sh := (shadow_coord.xyz/shadow_coord.w)*0.5+0.5;
+  samp := 1.0;
+  for (i:=-2; i<=2; i++){
+    for (j:=-2; j<=2; j++){
+      if (map_shadow.sample(sh.xy+{(i as f32),j}*0.001).x<sh.z-shadow_bias){
+        samp -= 0.022;
+      }
+    }
+  }
+  color *= samp;
+
+  return {...color,1.0};
+}) as "fragment")
+
+shadow_material := frag.program(embed(func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3]
+):vec[f32,4]{
+  c := frag_coord.z;
+  return {c,c,c,1.0};
+}) as "fragment");
+
+normal_material := frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying position:vec[f32,3],
+  @uniform view:vec[f32,4,4],
+):vec[f32,4]{
+  c := normal*0.5+0.5;
+  return {c.x,c.y,c.z,1.0};
+}) as "fragment");
+
+minimap_material := frag.program(embed(func(
+  @uniform image : frag.Texture,
+  @uniform eye : vec[f32,3],
+  @varying uv:vec[f32,2],
+):vec[f32,4]{
+  uuv := {1.0-uv.y, uv.x};
+  c := image.sample({uuv.x,1.0-uuv.y}).x;
+  color := {1.0,1.0,1.0,1.0-c};
+  if ((uuv-eye.xz/{1500.,1500.}).mag()<0.01){
+    color *= {1.0,0.0,0.0,1.0};
+    color += {0.0,0.0,0.0,1.0};
+  }
+  return color;
+}) as "fragment");
+
+modelling_material := frag.program(embed (func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3],
+  @varying position:vec[f32,3],
+  @uniform view:vec[f32,4,4],
+  @uniform l_dir:vec[f32,3],
+):vec[f32,4]{
+  c := normal.dot(l_dir);
+  c = c*0.4+0.6;
+  pw := {position.x, position.y, position.z, 1.0};
+  pw = view @* pw;
+  z := -pw.z/pw.w;
+  z = 1.0-(z-10.0)/(120.0);
+  c *= z;
+  return {c,c,c,1.0};
+}) as "fragment");
+
+func light_bounds(view:vec[f32,4,4],eye:vec[f32,3]):vec[f32,6]{
+  min := eye + {-500.0, -50.0, -100.0};
+  siz := { 1000.0,200.,200.0 };
+  left:=math.INF;
+  right:=-math.INF;
+  bottom:=math.INF;
+  top:=-math.INF;
+  near:=math.INF;
+  far:=-math.INF;
+  for (x := 0; x < 2; x++){
+    for (y := 0; y < 2; y++){
+      for (z := 0; z < 2; z++){
+        corner := {min.x+x*siz.x, min.y+y*siz.y, min.z+z*siz.z};
+        lsw := (view @* {...corner,1.0}).xyzw;
+        ls := lsw.xyz/lsw.w;
+        left  = math.min(left,  ls.x);
+        right = math.max(right, ls.x);
+        bottom= math.min(bottom,ls.y);
+        top   = math.max(top,   ls.y);
+        near  = math.min(near,  ls.z);
+        far   = math.max(far,   ls.z);
+      }
+    }
+  }
+  return {left,right,bottom,top,-far,-near};
+}
+
+func generate_maze(w:i32,h:i32):arr[u8,2]{
+  maze_data := arr.make[u8,2]({h, w},0)
+
+  func maze_r_hi3(x:i32,y:i32):u8{
+    return (maze_data[y,x]>>5)&0x7;
+  }
+  func maze_r_lo5(x:i32,y:i32):u8{
+    return maze_data[y,x]&0x1f;
+  }
+  func maze_x_hi3(x:i32,y:i32){
+    maze_data[y,x]&=0x1f;
+  }
+  func maze_w_hi3(x:i32,y:i32,v:i32){
+    maze_data[y,x]&=0x1f;
+    maze_data[y,x]|=v<<5;
+  }
+  func maze_on_bitn(x:i32,y:i32,n:i32){
+    maze_data[y,x]|=1<<n;
+  }
+  maze_data[0,0]=1;
+  sx := 1;
+  sy := 0;
+  x := sx;
+  y := sy;
+  r := 0;
+  while (1){
+    ox := x;
+    oy := y;
+    do{
+      x = ox;
+      y = oy;
+      r = rand.random(4) as i32;
+      if (!(r & 1)){
+        x += (r & 2) - 1;
+      }else{
+        y += (r & 2) - 1;
+      }
+    }while(x < 0 || y < 0 || x >= w|| y >= h);
+
+    maze_w_hi3(ox,oy,r);
+    if (maze_r_lo5(x,y)){
+      ox = x; 
+      oy = y;
+      x = sx;
+      y = sy;
+      do{
+        r = maze_r_hi3(x,y);
+        maze_on_bitn(x,y,4);
+        if ( !(r & 1)){
+          if (!(r & 2)){
+            maze_on_bitn(x,y,3);
+            x -= 1;
+            maze_on_bitn(x,y,0);
+          }else{
+            maze_on_bitn(x,y,0);
+            x += 1;
+            maze_on_bitn(x,y,3);
+          }
+        }else{
+          if (!(r & 2 )){
+            maze_on_bitn(x,y,1);
+            y -= 1;
+            maze_on_bitn(x,y,2);
+          }else{
+            maze_on_bitn(x,y,2);
+            y += 1;
+            maze_on_bitn(x,y,1);
+          }
+        }
+      } while (x != ox || y != oy);
+      sx = -1; 
+      sy = -1;
+      for (y = 0; y < h; y++){
+        for (x = 0; x < w; x++){
+          maze_x_hi3(x,y);
+          if (sx == -1 && sy == -1 && !maze_data[y,x]){
+            sx = x;
+            sy = y;
+          }
+        }
+      }
+      if (sx == -1 && sy == -1){
+      }else{
+        x = sx;
+        y = sy;
+        ox = x;
+        oy = y;
+        continue;
+      }
+      break;
+    }
+  }
+  return maze_data;
+}
+
+func maze_to_map(maze_data:arr[u8,2]):arr[u8,2]{
+  lvl_map := arr.make[u8,2]({MAP_H, MAP_W},99)
+  for (i := 1; i < MAP_H-1; i++){
+    for (j := 1; j < MAP_W-1; j++){
+      lvl_map[i,j] = 0;
+    }
+  }
+  for (i := 0; i < MAZE_H; i++){
+    for (j := 0; j < MAZE_W; j++){
+      v := maze_data[i,j];
+      if (!(v & 8)){
+        lvl_map[1+(i*2),1+(j*2)] = 1;
+        lvl_map[1+(i*2+1),1+(j*2)] = 1;
+      }
+      if (!(v & 4)){
+        lvl_map[1+(i*2+2),1+(j*2)] = 1;
+        lvl_map[1+(i*2+2),1+(j*2+1)] = 1;
+      }
+      if (!(v & 2)){
+        lvl_map[1+(i*2),1+(j*2)] = 1;
+        lvl_map[1+(i*2),1+(j*2+1)] = 1;
+      }
+      if (!(v & 1)){
+        lvl_map[1+(i*2),  1+(j*2+2)] = 1;
+        lvl_map[1+(i*2+1),1+(j*2+2)] = 1;
+        lvl_map[1+(i*2+2),1+(j*2+2)] = 1;
+      }
+    }
+  }
+  for (i := 1; i < MAP_H-1; i++){
+    for (j := 1; j < MAP_W-1; j++){
+      if (lvl_map[i,j] == 1){
+        a := lvl_map[i,j-1];
+        b := lvl_map[i,j+1];
+        c := lvl_map[i-1,j];
+        d := lvl_map[i+1,j];
+        n := a + b + c + d;
+        if (c == 0 || d == 0){
+          if (b == 0){
+            k := 1;
+            while (j+k < MAP_W-1 && lvl_map[i,j+k] == 0){
+              lvl_map[i,j+k] = 2;
+              k++;
+            }
+          }
+          if (a == 0){
+            k := 1;
+            while (j-k > 0 && lvl_map[i,j-k] == 0){
+              lvl_map[i,j-k] = 2;
+              k++;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return lvl_map;
+}
+
+func is_obstacle(px:f32,py:f32):i32{
+  mx := (px/5) as i32;
+  my := (py/5) as i32;
+  radius := 3;
+  for (ox := -radius; ox <= radius; ox += radius) {
+    for (oy := -radius; oy <= radius; oy += radius) {
+      mx := ((px + ox) / 5) as i32;
+      my := ((py + oy) / 5) as i32;
+      if (nav_map[my,mx,0] == 0) return 1;
+    }
+  }
+  return 0;
+}
+
+maze_data := generate_maze(MAZE_W,MAZE_H);
+lvl_map := maze_to_map(maze_data);
+
+for (i := 0; i < MAP_H; i++){
+  for (j := 0; j < MAP_W; j++){
+    if (lvl_map[i,j] == 1){
+      io.print("##");
+    }else if (lvl_map[i,j] == 2){
+      io.print("--");
+    }else if (lvl_map[i,j] == 99){
+      io.print("..");
+    }else{
+      io.print("  ");
+    }
+  }
+  io.println("");
+}
+
+cam := rdr.Camera{};
+cam.perspective(60,W/(H as f32),0.1,2000.0);
+
+eye := {150.,12.,150};
+
+yaw := math.PI/2;
+pitch := 0.2;
+god := 0;
+
+vel := {0.,0.,0.};
+spd := 0.1;
+asp := 0.01;
+
+keys_held := dict[i32,i32]{};
+drag := {0.,0.,0.};
+
+M := 200
+N := 500
+
+pieces := sponza(lvl_map);
+
+map_shadow := frag.texture(1024,1024);
+
+l_dir := {1.0,5.0,2.0}.dir();
+light := rdr.Camera{};
+light.look_at(l_dir,{0.,0,0},rdr.AXIS_Y);
+// light.ortho(-50,150,-150,50,-150,100);
+
+hud := rdr.Camera{};
+hud.ortho(0,W,H,0,-1,1);
+
+show_map := 0;
+
+map_nav := frag.texture(...nav_map.shape().yx);
+map_nav.write_pixels(nav_map);
+// io.write_file("test.png",img.encode("png",map_nav.read_pixels()));
+
+mesh_quad := rdr.Mesh{};
+add_face(mesh_quad, list[vec[f32,3]]{
+  {0.,0.,0.0},
+  {0.,1,0.0},
+  {1,1,0.0},
+  {1,0.,0.0},
+});
+
+while (1){
+  time.fps(120);
+  rdr.background(0.67,0.67,0.67);
+
+  forward := ({
+    math.cos(pitch)*math.sin(yaw),
+    math.sin(pitch),
+    math.cos(pitch)*math.cos(yaw)
+  }).dir();
+  right := forward.cross({0.,1.,0.}).dir();
+  up := right.cross(forward);
+
+  cam.look_at(eye,eye+forward,rdr.AXIS_Y);
+
+  light.ortho(...light_bounds(light.view, eye));
+  shadow_matrix := light.proj@*light.view;
+  frag.begin(shadow_material,map_shadow);
+  rdr.background(0.0);
+  light.begin();
+  for (i := 0; i < pieces.length(); i++){
+    pieces[i].mesh.draw(pieces[i].trfm);
+  }
+  light.end();
+  frag.end();
+  
+
+  lmatl := -1;
+
+  for (i := 0; i < pieces.length(); i++){
+    if (lmatl != pieces[i].matl){
+      mt := (pieces[i].matl&MASK_MATL_TYP);
+      mv := (pieces[i].matl&MASK_MATL_VAR);
+      if (lmatl != -1){
+        cam.end();
+        frag.end();
+      }
+      if (mt == MATL_NONE){
+        frag.begin(modelling_material);
+      }else{
+        frag.begin(phong_material);
+      }
+      cam.begin();
+
+      frag.uniform("map_noise",tex_noise);
+      frag.uniform("eye",eye);
+      frag.uniform("l_dir",l_dir);
+      frag.uniform("map_shadow",map_shadow);
+      frag.uniform("shadow_matrix",shadow_matrix);
+      frag.uniform("shadow_bias",0.004);
+      
+      if (mt == MATL_BRIK){
+        frag.uniform("map_bump",tex_brick);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.02);
+        frag.uniform("tint0",{1.0,1.0,1.0});
+        frag.uniform("tint1",{0.5,0.5,0.5});
+        frag.uniform("col_ambi",{0.2,0.2,0.2});
+        frag.uniform("col_spec",{0.1,0.1,0.1});
+        frag.uniform("uv_scale",{0.1,0.1});
+        frag.uniform("uv_offset",{10.0,10.0});
+        frag.uniform("bump2diff",0.5);
+        frag.uniform("noise_lvl",0);
+        frag.uniform("k_tint",0);
+      }else if (mt == MATL_TILE){
+        frag.uniform("map_bump",tex_tile);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",32.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{0.5,0.5,0.5});
+        frag.uniform("tint1",{0.5,0.5,0.5});
+        frag.uniform("col_ambi",{0.2,0.2,0.2});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0/32,1.0/32});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.1);
+        frag.uniform("noise_lvl",0);
+        frag.uniform("k_tint",0.0);
+      }else if (mt == MATL_COL1){
+        frag.uniform("map_bump",tex_col1);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",20.0);
+        frag.uniform("bumpiness",0.02);
+        frag.uniform("tint0",{1.0,1.0,1.0});
+        frag.uniform("tint1",{0.5,0.5,0.5});
+        frag.uniform("col_ambi",{0.2,0.2,0.2});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.8);
+      }else if (mt == MATL_ARCH){
+        frag.uniform("map_bump",tex_arch);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{1.0,1.0,1.0});
+        frag.uniform("tint1",{0.5,0.5,0.5});
+        frag.uniform("col_ambi",{0.2,0.2,0.2});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{0.5*(mv/15+1),(mv as f32)/10.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.8);
+      }else if (mt == MATL_COL2){
+        frag.uniform("map_bump",tex_col2);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.02);
+        frag.uniform("tint0",{1.0,1.0,1.0});
+        frag.uniform("tint1",{0.6,0.6,0.6});
+        frag.uniform("col_ambi",{0.2,0.2,0.2});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.8);
+      }else if (mt == MATL_LEDG){
+        frag.uniform("map_bump",tex_ledge);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.02);
+        frag.uniform("tint0",{0.2,0.2,0.2});
+        frag.uniform("tint1",{0.1,0.1,0.1});
+        frag.uniform("col_ambi",{0.1,0.1,0.1});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("noise_lvl",2);
+        frag.uniform("k_tint",0.8);
+      }else if (mt == MATL_CEIL){
+        frag.uniform("map_bump",tex_ceil);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",5.0);
+        frag.uniform("bumpiness",0.005);
+        frag.uniform("tint0",{0.9,0.9,0.9});
+        frag.uniform("tint1",{0.7,0.7,0.7});
+        frag.uniform("col_ambi",{0.15,0.15,0.15});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{0.666,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.7);
+      }else if (mt == MATL_CAP1){
+        frag.uniform("map_bump",tex_slab);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{0.9,0.9,0.9});
+        frag.uniform("tint1",{0.7,0.7,0.7});
+        frag.uniform("col_ambi",{0.15,0.15,0.15});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.7);
+      }else if (mt == MATL_COL3){
+        frag.uniform("map_bump",tex_slab);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{0.9,0.9,0.9});
+        frag.uniform("tint1",{0.7,0.7,0.7});
+        frag.uniform("col_ambi",{0.15,0.15,0.15});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,2.0});
+        frag.uniform("uv_offset",{2.0,2.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.7);
+        frag.uniform("shadow_bias",0.006);
+      }else if (mt == MATL_VOLU){
+        frag.uniform("map_bump",tex_volute);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",10.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{0.9,0.9,0.9});
+        frag.uniform("tint1",{0.7,0.7,0.7});
+        frag.uniform("col_ambi",{0.15,0.15,0.15});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.2);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.7);
+      }else if (mt == MATL_ROOF){
+        frag.uniform("map_bump",tex_roof);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",5.0);
+        frag.uniform("bumpiness",0.03);
+        frag.uniform("tint0",{0.2,0.2,0.2});
+        frag.uniform("tint1",{0.1,0.1,0.1});
+        frag.uniform("col_ambi",{0.1,0.1,0.1});
+        frag.uniform("col_spec",{0.2,0.2,0.2});
+        frag.uniform("uv_scale",{0.05,0.05});
+        frag.uniform("uv_offset",{20.0,20.0});
+        frag.uniform("bump2diff",0.0);
+        frag.uniform("noise_lvl",0);
+        frag.uniform("k_tint",0.5);
+      }else if (mt == MATL_FABR){
+        frag.uniform("map_bump",mv?tex_drape2:tex_drape1);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",40.0);
+        frag.uniform("bumpiness",0.01);
+        frag.uniform("tint0",{1.0,1.0,1.0});
+        frag.uniform("tint1",{0.9,0.9,0.9});
+        frag.uniform("col_ambi",{0.3,0.3,0.3});
+        frag.uniform("col_spec",{0.5,0.5,0.5});
+        frag.uniform("uv_scale",mv?{2.0,1.0}:{2.0,4.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",1.0);
+        frag.uniform("noise_lvl",1);
+        frag.uniform("k_tint",0.8);
+        frag.uniform("shadow_bias",0.1);
+      }else if (mt == MATL_POLE){
+        frag.uniform("map_bump",tex_pole);
+        frag.uniform("map_ao",tex_blank);
+        frag.uniform("shininess",50.0);
+        frag.uniform("bumpiness",0.015);
+        frag.uniform("tint0",{0.2,0.2,0.2});
+        frag.uniform("tint1",{0.1,0.1,0.1});
+        frag.uniform("col_ambi",{0.1,0.1,0.1});
+        frag.uniform("col_spec",{0.5,0.5,0.5});
+        frag.uniform("uv_scale",{1.0,1.0});
+        frag.uniform("uv_offset",{0.0,0.0});
+        frag.uniform("bump2diff",0.0);
+        frag.uniform("noise_lvl",2);
+        frag.uniform("k_tint",0.8);
+      }
+    }
+    // pieces[i].mesh.mode = rdr.MODE_LINE_LIST;
+    pieces[i].mesh.draw(pieces[i].trfm);
+
+    lmatl = pieces[i].matl;
+  }
+
+  if (lmatl != -1){
+    cam.end();
+    frag.end();
+  }
+
+  if (show_map){
+    frag.begin(minimap_material);
+    hud.begin();
+    frag.uniform("image", map_nav);
+    frag.uniform("eye", eye);
+    mesh_quad.draw(rdr.mat.translate(W/2-150,H/2-150,0) @* rdr.mat.scale(300,300,1));
+    hud.end();
+    frag.end();
+  }
+
+  hud.begin();
+  rdr.text("[WASD]MOVE  [LMB-DRAG]LOOK  [M]MAP  [G]GOD ",rdr.mat.translate(W-344,H-16,0));
+  hud.end();
+
+  if (god){
+    if (keys_held['w']){
+      vel += forward*spd;
+    }
+    if (keys_held['s']){
+      vel -= forward*spd;
+    }
+    if (keys_held['a']){
+      vel -= right*spd;
+    }
+    if (keys_held['d']){
+      vel += right*spd;
+    }
+    vel *= 0.9;
+    eye += vel;
+  }else{
+    forw2d := (forward*{1.,0.,1.}).dir()
+    rite2d := (right*{1.,0.,1.}).dir()
+    if (keys_held['w']){
+      vel += forw2d*spd;
+    }
+    if (keys_held['s']){
+      vel -= forw2d*spd;
+    }
+    if (keys_held['a']){
+      vel -= rite2d*spd;
+    }
+    if (keys_held['d']){
+      vel += rite2d*spd;
+    }
+    vel *= 0.9;
+    // eye += vel;
+    nx := eye.x + vel.x;
+    nz := eye.z + vel.z;
+    if (is_obstacle(nx, eye.z)){
+      nx = eye.x;
+    }
+    if (is_obstacle(eye.x, nz)){
+      nz = eye.z;
+    }
+    eye = {nx,12.0,nz};
+  }
+
+  e := win.poll();
+  if (e.type == win.KEY_PRESSED){
+    keys_held[e.key] = 1;
+    if (e.key == 'm'){
+      show_map = 1- show_map;
+    }else if (e.key == 'g'){
+      god = 1-god;
+    }
+  }else if (e.type == win.KEY_RELEASED){
+    keys_held[e.key] = 0;
+  }else if (e.type == win.MOUSE_PRESSED){
+    drag = {e.x,e.y,1.0};
+    
+  }else if (e.type == win.MOUSE_RELEASED){
+    drag = {e.x,e.y,0.0};
+  }else if (e.type == win.MOUSE_MOVED){
+    if (drag.z){
+      dx := drag.x - e.x;
+      dy := drag.y - e.y;
+      
+      yaw -= dx*asp;
+      pitch -= dy*asp;
+      pitch = math.min(math.max(pitch,-math.PI/2+0.01),math.PI/2-0.01);
+      drag = {e.x,e.y,1.0};
+    }
+  }
+  
+}
