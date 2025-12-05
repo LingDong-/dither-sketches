@@ -1615,8 +1615,9 @@ func sponza(lvl_map:arr[u8,2]):list[Piece]{
     for (j := 0; j < MAP_W; j++){
       if (lvl_map[i,j] == 1){
         if (lvl_map[i-1,j] == 0){
+          start := lvl_map[i-1,j-1]==1;
           end := lvl_map[i-1,j+1]==1;
-          assembly134(rdr.mat.translate(j*60+20,0,i*60+20)@*rot180, 0);
+          assembly134(rdr.mat.translate(j*60+20,0,i*60+20)@*rot180, start<<1);
           assembly134(rdr.mat.translate(j*60+40,0,i*60+20)@*rot180, 0);
           assembly134(rdr.mat.translate(j*60+60,0,i*60+20)@*rot180, end);
           if (end){
@@ -1624,17 +1625,19 @@ func sponza(lvl_map:arr[u8,2]):list[Piece]{
           }
         }
         if (lvl_map[i+1,j] == 0){
+          start := lvl_map[i+1,j+1]==1;
           end := lvl_map[i+1,j-1]==1;
           assembly134(rdr.mat.translate(j*60,0,i*60+40), end);
           assembly134(rdr.mat.translate(j*60+20,0,i*60+40), 0);
-          assembly134(rdr.mat.translate(j*60+40,0,i*60+40), 0);
+          assembly134(rdr.mat.translate(j*60+40,0,i*60+40), start<<1);
           if (end){
             assembly22(rdr.mat.translate(j*60-20,0,i*60+40));
           }
         }
         if (lvl_map[i,j+1] == 0){
+          start := lvl_map[i-1,j+1]!=0;
           end := lvl_map[i+1,j+1]!=0;
-          assembly13(rdr.mat.translate(j*60+40,0,i*60+20)@*rot90, 0);
+          assembly13(rdr.mat.translate(j*60+40,0,i*60+20)@*rot90, start<<1);
           assembly13(rdr.mat.translate(j*60+40,0,i*60+40)@*rot90, 0);
           assembly13(rdr.mat.translate(j*60+40,0,i*60+60)@*rot90, end);
           if (end){
@@ -1642,10 +1645,11 @@ func sponza(lvl_map:arr[u8,2]):list[Piece]{
           }
         }
         if (lvl_map[i,j-1] == 0){
+          start := lvl_map[i+1,j-1]!=0;
           end := lvl_map[i-1,j-1]!=0;
           assembly13(rdr.mat.translate(j*60+20,0,i*60+0) @*rot270, end);
           assembly13(rdr.mat.translate(j*60+20,0,i*60+20)@*rot270, 0);
-          assembly13(rdr.mat.translate(j*60+20,0,i*60+40)@*rot270, 0);
+          assembly13(rdr.mat.translate(j*60+20,0,i*60+40)@*rot270, start<<1);
           if (end){
             assembly22(rdr.mat.translate(j*60+20,0,i*60-20)@*rot270);
           }
@@ -1653,8 +1657,9 @@ func sponza(lvl_map:arr[u8,2]):list[Piece]{
 
       }else if (lvl_map[i,j] == 2){
         if (lvl_map[i-1,j] == 0){
+          start := lvl_map[i-1,j-1]==1;
           end := lvl_map[i-1,j+1]==1;
-          assembly134(rdr.mat.translate(j*60+20,0,i*60+20)@*rot180, 0);
+          assembly134(rdr.mat.translate(j*60+20,0,i*60+20)@*rot180, start<<1);
           assembly53(rdr.mat.translate(j*60+40,0,i*60+20)@*rot180, 0);
           assembly134(rdr.mat.translate(j*60+60,0,i*60+20)@*rot180, end);
           if (end){
@@ -1662,10 +1667,11 @@ func sponza(lvl_map:arr[u8,2]):list[Piece]{
           }
         }
         if (lvl_map[i+1,j] == 0){
+          start := lvl_map[i+1,j+1]==1;
           end := lvl_map[i+1,j-1]==1;
           assembly134(rdr.mat.translate(j*60,0,i*60+40), end);
           assembly53(rdr.mat.translate(j*60+20,0,i*60+40), 0);
-          assembly134(rdr.mat.translate(j*60+40,0,i*60+40), 0);
+          assembly134(rdr.mat.translate(j*60+40,0,i*60+40), start<<1);
           if (end){
             assembly22(rdr.mat.translate(j*60-20,0,i*60+40));
           }
@@ -2652,7 +2658,7 @@ pieces := sponza(lvl_map);
 
 map_shadow := frag.texture(1024,1024);
 
-l_dir := {1.0,5.0,2.0}.dir();
+l_dir := {-1.0,5.0,2.0}.dir();
 light := rdr.Camera{};
 light.look_at(l_dir,{0.,0,0},rdr.AXIS_Y);
 // light.ortho(-50,150,-150,50,-150,100);
