@@ -390,7 +390,7 @@ func arch2_edge():rdr.Mesh{
 func col2():rdr.Mesh{
   mesh := rdr.Mesh{};
   prof := list[vec[f32,3]]{
-    {1,0,0.},
+    {1,-0.001,0.},
     {2.5,0,0.},
     {2.75,-0.25,0.},
     {2.5,-0.5,0.},
@@ -478,7 +478,7 @@ func col3():rdr.Mesh{
     {1.25,-0.5,0.},
     {0.8,-1.0,0.},
     {0.6,-1.5,0.},
-    {0.8,-1.5,0.},
+    {0.8,-1.5001,0.},
     {0.8,-1.75,0.},
     {0.6,-1.75,0.},
     {0.65,-3.0,0.},
@@ -2133,6 +2133,15 @@ light.look_at(l_dir,{0.,0,0},rdr.AXIS_Y);
 light.ortho(...light_bounds(light.view, M,N));
 shadow_matrix := light.proj@*light.view;
 
+frag.begin(shadow_material,map_shadow);
+rdr.background(0.0);
+light.begin();
+for (i := 0; i < pieces.length(); i++){
+  pieces[i].mesh.draw(pieces[i].trfm);
+}
+light.end();
+frag.end();
+
 while (1){
   time.fps(120);
   rdr.background(0.67,0.67,0.67);
@@ -2146,16 +2155,6 @@ while (1){
   up := right.cross(forward);
 
   cam.look_at(eye,eye+forward,rdr.AXIS_Y);
-
-  frag.begin(shadow_material,map_shadow);
-  rdr.background(0.0);
-  light.begin();
-  for (i := 0; i < pieces.length(); i++){
-    pieces[i].mesh.draw(pieces[i].trfm);
-  }
-  light.end();
-  frag.end();
-  
 
   lmatl := -1;
 

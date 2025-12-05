@@ -10,7 +10,7 @@ include "std/rdr"
 include "std/win"
 include "std/time"
 include "std/rand"
-include "std/img"
+// include "std/img"
 
 MAZE_W := 11
 MAZE_H := 11
@@ -1112,10 +1112,10 @@ mesh_roof1 := roof1();
 
 mesh_floor2 := rdr.Mesh{};
 add_face(mesh_floor2, list[vec[f32,3]]{
-  {0.,26.5,0.},
-  {0.,26.5,20},
-  {20,26.5,20},
-  {20,26.5,0.},
+  {0.,24.5,0.},
+  {0.,24.5,20},
+  {20,24.5,20},
+  {20,24.5,0.},
 });
 
 piece_map := dict[rdr.Mesh, Piece]{};
@@ -1697,7 +1697,9 @@ func sponza(lvl_map:arr[u8,2]):list[Piece]{
   pieces.sort(func(p:Piece):f32{
     return p.matl as f32;
   });
-
+  for (i := 0; i < pieces.length(); i++){
+    pieces[i].mesh.mode |= rdr.CULL_FRUSTUM;
+  }
   return pieces;
 }
 
@@ -2612,20 +2614,20 @@ func is_obstacle(px:f32,py:f32):i32{
 maze_data := generate_maze(MAZE_W,MAZE_H);
 lvl_map := maze_to_map(maze_data);
 
-for (i := 0; i < MAP_H; i++){
-  for (j := 0; j < MAP_W; j++){
-    if (lvl_map[i,j] == 1){
-      io.print("##");
-    }else if (lvl_map[i,j] == 2){
-      io.print("--");
-    }else if (lvl_map[i,j] == 99){
-      io.print("..");
-    }else{
-      io.print("  ");
-    }
-  }
-  io.println("");
-}
+// for (i := 0; i < MAP_H; i++){
+//   for (j := 0; j < MAP_W; j++){
+//     if (lvl_map[i,j] == 1){
+//       io.print("##");
+//     }else if (lvl_map[i,j] == 2){
+//       io.print("--");
+//     }else if (lvl_map[i,j] == 99){
+//       io.print("..");
+//     }else{
+//       io.print("  ");
+//     }
+//   }
+//   io.println("");
+// }
 
 cam := rdr.Camera{};
 cam.perspective(60,W/(H as f32),0.1,2000.0);
