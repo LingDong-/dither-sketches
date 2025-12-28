@@ -30,3 +30,15 @@ A 3D jujube-ish fruit with a mathematical shape.
 ## [sponza.dh](sponza.dh)
 Attempt at rendering the famous Sponza Palace model (Dabrovic, Meinl, McGuire).
 ![](https://github.com/user-attachments/assets/6e985119-6e64-4f71-b610-e50817a342ea)
+
+## [spongen.dh](spongen.dh)
+Procedurally generated scene inspired by the Sponza Palace.
+![](https://github.com/user-attachments/assets/a131efbf-2650-42db-a033-280bda285a40)
+
+## [spomaze.dh](spomaze.dh)
+Procedurally generated maze with procedurally generated architecture inspired by the Sponza Palace.
+![](https://github.com/user-attachments/assets/70099315-f64c-4f34-b228-894cb2fcabda)
+
+## [pork.dh](pork.dh)
+Juicy, bouncy, red-braised pork, procedurally generated.
+![](https://github.com/user-attachments/assets/cd52d7de-e9df-4224-bc72-7e09be361936)
