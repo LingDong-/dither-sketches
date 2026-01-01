@@ -42,3 +42,7 @@ Procedurally generated maze with procedurally generated architecture inspired by
 ## [pork.dh](pork.dh)
 Juicy, bouncy, red-braised pork, procedurally generated.
 ![](https://github.com/user-attachments/assets/cd52d7de-e9df-4224-bc72-7e09be361936)
+
+## [fulu.dh](fulu.dh)
+3D simulation of a burning strip of paper flying in the wind, inspired by the Taoist practice.
+![](https://github.com/user-attachments/assets/5189af72-89dc-4477-895c-1dded72d2fc3)

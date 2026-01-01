@@ -1,0 +1,426 @@
+include "std/rdr"
+include "std/frag"
+include "std/io"
+include "std/list"
+include "std/vec"
+include "std/win"
+include "std/math"
+include "std/time"
+include "std/rand"
+include "std/geom"
+
+N_MESH := 20;
+M_MESH := 10;
+N_FIRE := 10;
+
+typedef Node = {
+  pos := {0.,0.,0.};
+  vel := {0.,0.,0.};
+  nbr := list[i32]{};
+  ben := list[i32]{};
+  fix := 0;
+};
+
+func make_graph():tup[list[Node],rdr.Mesh]{
+  mesh := rdr.Mesh{};
+  nodes := list[Node]{};
+  n := N_MESH;
+  m := M_MESH;
+  for (i := 0; i < n; i++){
+    for (j := 0; j < m; j++){
+      v := {(j as f32)/m*2.0,(i as f32)/n*8.0,0.0}
+      nd := Node{pos:v};
+      mesh.vertices.push(v);
+      mesh.normals.push({0.,0.,1.});
+      mesh.uvs.push({
+        (j as f32)/(m-1),
+        (i as f32)/(n-1)
+      });
+      nodes.push(nd);
+    }
+  }
+  for (i := 0; i < n; i++){
+    for (j := 0; j < m; j++){
+      i0 := i*m+j;
+      i1 := i*m+j+1;
+      i2 := (i+1)*m+j;
+      i3 := (i+1)*m+j+1;
+
+      if (i < n-1){
+        nodes[i0].nbr.push(i2);
+        nodes[i2].nbr.push(i0);
+        // mesh.indices.push(i0);
+        // mesh.indices.push(i2);
+        if (i > 0){
+          nodes[i0].ben.push(i0-m);
+          nodes[i0].ben.push(i0+m);
+        }
+      }
+      if (j < m-1){
+        nodes[i0].nbr.push(i1);
+        nodes[i1].nbr.push(i0);
+        // mesh.indices.push(i0);
+        // mesh.indices.push(i1);
+        if (j > 0){
+          nodes[i0].ben.push(i0-1);
+          nodes[i0].ben.push(i0+1);
+        }
+      }
+
+      if (j < m-1 && i < n-1){
+        mesh.indices.push(i0);
+        mesh.indices.push(i3);
+        mesh.indices.push(i1);
+        mesh.indices.push(i0);
+        mesh.indices.push(i3);
+        mesh.indices.push(i2);
+      }
+    }
+  }
+  // nodes[0].fix = 1;
+  // nodes[9].fix = 1;
+  // mesh.mode = rdr.MODE_POINT_LIST;
+  // mesh.mode = rdr.MODE_LINE_LIST;
+  return [nodes,mesh];
+}
+
+func make_fire():rdr.Mesh{
+  mesh := rdr.Mesh{};
+  n := N_FIRE;
+  m := M_MESH;
+  for (i := 0; i < n; i++){
+    for (j := 0; j < m; j++){
+      v := {(j as f32)/m*2.0,(i as f32)/n*2.0,0.0};
+      mesh.vertices.push(v);
+      mesh.uvs.push({
+        (j as f32)/(m-1),
+        (i as f32)/(n-1)
+      });
+      mesh.normals.push({0.,0.,1.});
+    }
+  }
+  for (i := 0; i < n-1; i++){
+    for (j := 0; j < m-1; j++){
+      i0 := i*m+j;
+      i1 := i*m+j+1;
+      i2 := (i+1)*m+j;
+      i3 := (i+1)*m+j+1;
+
+      mesh.indices.push(i0);
+      mesh.indices.push(i3);
+      mesh.indices.push(i1);
+      mesh.indices.push(i0);
+      mesh.indices.push(i3);
+      mesh.indices.push(i2);
+    }
+  }
+  return mesh;
+}
+
+
+;[nodes,mesh] := make_graph();
+mesh_fire := make_fire();
+
+// io.println(nodes);
+
+func simulate(){
+  for (iter := 0; iter < 1; iter++){
+    for (i := 0; i < nodes.length(); i++){
+      // io.println(nodes[i].nbr)
+      // avg := {0.0,0.0,0.0};
+      for (j := 0; j < nodes[i].nbr.length(); j++){
+        v := nodes[i].pos;
+        u := nodes[nodes[i].nbr[j]].pos;
+        // avg += u;
+        d := u-v;
+        l := d.mag();
+        // if (l) d /= l;
+        if (l < 0.0999){
+          nodes[i].vel -= d*0.05;
+        }else if (l > 0.1001){
+          nodes[i].vel += d*0.05;
+        }
+      }
+      // avg /= nodes[i].nbr.length();
+      // nodes[i].vel = (avg-nodes[i].pos)*0.001;
+      for (j := 0; j < nodes[i].ben.length(); j+=2){
+        vi := nodes[i].pos;
+        vj := nodes[nodes[i].ben[j]].pos;
+        vk := nodes[nodes[i].ben[j+1]].pos;
+        a := (vj-vi).dir();
+        b := (vk-vi).dir();
+        nml := (a.cross(b)).dir();
+        th := math.cos(a.dot(b));
+        dth := th-math.PI;
+        // th := a.dot(b);
+        // dth := th+1;
+        fj := nml.cross(a)*dth*0.0015;
+        fk := b.cross(nml)*dth*0.0015;
+        nodes[nodes[i].ben[j]].vel += fj;
+        nodes[nodes[i].ben[j+1]].vel += fk;
+        // nodes[i].vel -= fj+fk;
+      }
+    }
+    for (i := 0; i < nodes.length(); i++){
+      nodes[i].vel += {0.0,-0.0001,0.0};
+      wind := {
+        rand.noise(...(nodes[i].pos*0.5)),
+        rand.noise(...(nodes[i].pos*0.5+{7.0,17.0,11.0})),
+        rand.noise(...(nodes[i].pos*0.5+{13.0,23.0,37.0})),
+      }*0.05;
+      nodes[i].vel += wind;
+      if (!nodes[i].fix){
+        nodes[i].pos += nodes[i].vel;
+      }
+      nodes[i].vel*=0.0;
+    }
+  }
+  for (i := 0; i < nodes.length(); i++){
+    mesh.vertices[i] = nodes[i].pos;
+    nml := {0.,0.,0.0001};
+    for (j := 0; j < nodes[i].nbr.length(); j++){
+      a := nodes[nodes[i].nbr[j]].pos - nodes[i].pos;
+      b := nodes[nodes[i].nbr[(j+1)%nodes[i].nbr.length()]].pos - nodes[i].pos;
+      nml += a.cross(b);
+    }
+    nml = nml.dir();
+    mesh.normals[i] = nml;
+  }
+}
+func simulate_fire(t:f32){
+  n := N_FIRE;
+  m := M_MESH;
+  // if (t >= 0.9){
+  //   for (i := 0; i < mesh_fire.vertices.length(); i++){
+  //     mesh_fire.vertices[i]*=0.0;
+  //   }
+  //   return;
+  // }
+  edg0 := t+0.1;
+  if (edg0 >= 1.0){
+    edg0 = 0.999;
+  }
+  prog := edg0 * (N_MESH-1);
+  row := math.floor(prog) as i32;
+  pct := prog-row;
+  // io.println("%{row} %{pct}");
+  for (j := 0; j < m; j++){
+    x := (j as f32)/(m-1);
+    v0 := mesh.vertices[row*m+j];
+    v1 := mesh.vertices[(row+1)*m+j];
+    v := v0 * (1-pct) + v1 * pct;
+    v += {0.0,-0.1,0.0}
+    h := math.sqrt(1-t)*0.3;
+    for (i := 0; i < n; i++){
+      r := ({
+        rand.noise(i*0.5,j*0.5,0.0+t*200.0),
+        rand.noise(i*0.5,j*0.5,1.0+t*200.0),
+        rand.noise(i*0.5,j*0.5,2.0+t*200.0),
+      }-0.5)*1.0;
+      mesh_fire.vertices[i*m+j] = v + {0.0,h,0.0}*i + r;
+    }
+  }
+}
+
+
+W := 640
+H := 480
+context := win.init(W,H,win.CONTEXT_3D)
+rdr.init(context);
+frag.init(context);
+
+func sigmoid(x:f32,a:f32):f32{
+  x = math.min(math.max(x,0.0),1.0);
+  a = 1.0-a;
+  y := 0.0;
+  if (x<=0.5){
+    y = ((2.0*x)**(1.0/a))/2.0;
+  } else {
+    y = 1.0 - ((2.0*(1.0-x))**(1.0/a))/2.0;
+  }
+  return y;
+}
+
+normal_material := frag.program(embed (func(
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+):vec[f32,4]{
+  c := normal*0.5+0.5;
+  return {c.x,c.y,c.z,1.0};
+  return {uv.x,uv.y,1.0,1.0};
+}) as "fragment");
+
+
+tex_diff := frag.texture(512,1024,frag.FILTER_MIPMAP|frag.WRAP_REPEAT);
+frag.begin(frag.program(embed (func(
+  @varying uv:vec[f32,2],
+):vec[f32,4]{
+  x := uv.x*2.0;
+  if (x > 1.0) x = 2.0-x;
+  y := uv.y;
+
+  q := rand.noise(x*2.0,y*40.0);
+  q = math.sin(q*25.0);
+  q *= math.sin(uv.x*math.PI);
+  // q *= math.sin(uv.y*math.PI);
+  q *= math.sqrt(1.0-(uv.y*2.0-1.0)*(uv.y*2.0-1.0));
+  q = sigmoid(q-0.2,0.98);
+  q = 1.0-q;
+  return {q,q,q,1.0};
+}) as "fragment"), tex_diff);
+frag.render();
+frag.end();
+
+main_material := frag.program(embed (func(
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @uniform l_dir:vec[f32,3],
+  @uniform map_diff : frag.Texture,
+  @uniform t:f32,
+):vec[f32,4]{
+  nml := normal*0.5+0.5;
+  ndl := math.max(nml.dot(l_dir),0.0);
+  edg0 := t + rand.noise(uv.x*2.0,t*2.0)*0.25;
+  edg1 := t+0.05 + rand.noise(uv.x*2.0,(t+0.05)*2.0)*0.3;
+  if (uv.y < edg0){
+    return {0.,0.,0.,-1.};
+  }
+  c := {0.3, 0.2, 0.0}*(1-ndl) + {1.0, 0.9, 0.4}*ndl;
+  if (uv.y < edg1){
+    q := rand.noise(uv.x*10.0,uv.y*10.0,t);
+    q = sigmoid(q,0.6);
+    s := (uv.y-edg0)/(edg1-edg0);
+    b := {0.1,0.,0.}*(1-q) + {0.9,0.4,0.0}*q;
+    ss := math.sqrt(s);
+    b = {0.,0.,0.}*(1-ss) + b*ss;
+    c = b*(1-s) + c*s;
+  }
+  c *= map_diff.sample(uv).xyz;
+  return {...c,1.0};
+}) as "fragment");
+
+ord_dith_map := arr[i32,2]{
+   0,48,12,60, 3,51,15,63; 32,16,44,28,35,19,47,31;
+   8,56, 4,52,11,59, 7,55; 40,24,36,20,43,27,39,23;
+   2,50,14,62, 1,49,13,61; 34,18,46,30,33,17,45,29;
+  10,58, 6,54, 9,57, 5,53; 42,26,38,22,41,25,37,21;
+};
+
+fire_material := frag.program(embed (func(
+  @builtin frag_coord : vec[f32,4],
+  @varying uv:vec[f32,2],
+  @uniform t:f32,
+):vec[f32,4]{
+  q := rand.noise(uv.x*10.0,uv.y*5.0-t*500.0,t*10.0);
+  // q *= math.sin(uv.x*math.PI)*math.sin(uv.y*math.PI);
+  // q *= math.sin(uv.x*math.PI)
+  q *= math.cos(uv.y*math.PI*0.5);
+  if (q < 0.2){
+    return {0.,0.,0.,-1.};
+  }
+  if (uv.y < rand.noise(uv.x*5.0,t*500.0)*0.1){
+    return {0.,0.,0.,-1.};
+  }
+  if (uv.y < 0.2){
+    q *= math.sin(uv.y*math.PI/0.4)
+  }
+
+  fc := (frag_coord.xy as vec[i32,2]);
+  d:= (ord_dith_map[fc.y%8,fc.x%8] as f32)/64.0
+  alph := (q-0.2)*5.0;
+  if (alph < d){
+    return {0.0,0.00,0.,-1.0}
+  }
+  c := {1.0,0.1,0.0} * (1-q) + {1.0,1.0,0.0} * (q);
+  return {...c,1.0}
+  // return {...c,alph};
+}) as "fragment");
+
+cam := rdr.Camera{};
+cam.perspective(60,W/(H as f32),0.01,100.0);
+
+yaw := math.PI/6;
+pitch := math.PI/12;
+zoom := 8.0;
+drag := {0.,0.,0.};
+targ := {0.,0.,0.};
+keys_held := dict[i32,i32]{};
+
+
+l_dir := {1.0,2.0,3.0}.dir();
+
+while (1){
+  time.fps(120);
+  rdr.background(0.0,0.05,0.1);
+  // rdr.background(0.2);
+  // rdr.background(0.6,0.65,0.7);
+
+  eye := {
+    math.cos(pitch)*math.sin(yaw),
+    math.sin(pitch),
+    math.cos(pitch)*math.cos(yaw)
+  }*zoom;
+  horz := eye.cross({0,1.,0}).dir();
+  vert := eye.cross(horz).dir();
+  cam.look_at(eye+targ,targ,rdr.AXIS_Y);
+
+  simulate();
+
+  [cen,ext,axs] := geom.bbox(mesh.vertices,geom.MODE_ALIGNED);
+  tick := ((time.millis()*0.00001)%0.9) as f32;
+
+  simulate_fire(tick);
+
+  // frag.begin(normal_material);
+  frag.begin(main_material);
+  frag.uniform("l_dir",l_dir);
+  frag.uniform("map_diff",tex_diff);
+  frag.uniform("t",tick);
+  cam.begin();
+  mesh.draw(rdr.mat.translate(...(cen*-1.0)));
+  cam.end();
+  frag.end();
+
+  frag.begin(fire_material);
+  frag.uniform("t",tick);
+  cam.begin();
+  mesh_fire.draw(rdr.mat.translate(...(cen*-1.0)));
+  cam.end();
+  frag.end();
+
+  mesh.update(rdr.DIRTY_VERTICES|rdr.DIRTY_NORMALS);
+  mesh_fire.update(rdr.DIRTY_VERTICES);
+
+  e := win.poll();
+  if (e.type == win.MOUSE_PRESSED){
+    drag = {e.x,e.y,(e.key==win.MOUSE_RIGHT || keys_held[win.KEY_LSHIFT as i32])?-1.0:1.0};
+  }else if (e.type == win.MOUSE_RELEASED){
+    drag = {e.x,e.y,0.0};
+  }else if (e.type == win.MOUSE_MOVED){
+    if (drag.z){
+      dx := drag.x - e.x;
+      dy := drag.y - e.y;
+      if (drag.z > 0){
+        yaw -= dx*0.01;
+        pitch -= dy*0.01;
+        pitch = math.min(math.max(pitch,-math.PI/2+0.01),math.PI/2-0.01);
+      }else{
+        targ -= horz * dx*0.005*zoom - vert * dy*0.005*zoom;
+      }
+      drag = {e.x,e.y,drag.z};
+    }
+  }else if (e.type == win.WHEEL_SCROLLED){
+    zoom += e.y*0.01;
+    if (zoom < 0.1){
+      zoom = 0.1;
+    }else if (zoom > 100.0){
+      zoom = 100.0;
+    }
+  }else if (e.type == win.KEY_PRESSED){
+    keys_held[e.key] = 1;
+  }else if (e.type == win.KEY_RELEASED){
+    keys_held[e.key] = 0;
+  }
+}
+
+
