@@ -1,0 +1,222 @@
+include "std/font"
+include "std/io"
+include "std/frag"
+include "std/rdr"
+include "std/str"
+include "std/list"
+include "std/vec"
+include "std/geom"
+include "std/math"
+include "std/win"
+include "std/time"
+include "std/arr"
+include "std/drw"
+
+bytes := io.read_file("../dither-lang/examples/assets/caslon.ttf");
+tf := font.decode(bytes);
+
+func bridge(land:list[vec[f32,2]],hole:list[vec[f32,2]]):list[vec[f32,2]]{
+  cands := list[tup[f32,i32,i32]]{};
+  for (i := 0; i < land.length(); i++){
+    for (j := 0; j < hole.length(); j++){
+      cands.push([(land[i]-hole[j]).mag(),i,j])
+    }
+  }
+  cands.sort(func(a:tup[f32,i32,i32]):f32{
+    return a[0];
+  });
+
+  either := list[]{land,hole};
+  
+  for (k := 0; k < cands.length(); k++){
+    [d,i0,i1] := cands[k];
+    ok := 1;
+    for (i := 0; i < either.length(); i++){
+      for (j := 0; j < either[i].length(); j++){
+        j1 := (j+1)%either[i].length();
+        if (i == 0 && (i0 == j || i0 == j1)) continue;
+        if (i == 1 && (i1 == j || i1 == j1)) continue;
+
+        [b,v] := geom.line_intersect(
+          either[i][j],either[i][j1],
+          land[i0],hole[i1],
+          geom.LHS_SEGMENT|geom.RHS_SEGMENT
+        );
+        if (b){
+          ok = 0;
+          break;
+        }
+      }
+      if (!ok) break;
+    }
+    if (ok){
+      return land.slice(0,i0+1).concat(
+        hole.slice(i1,hole.length())
+      ).concat(
+        hole.slice(0,i1+1)
+      ).concat(
+        land.slice(i0,land.length())
+      )
+    }
+  }
+  io.println("[warn] bridge failed");
+  return land.concat(hole);
+}
+
+func no_repeat_ends(p:list[vec[f32,2]]){
+  if (p[0] == p[p.length()-1]){
+    p.pop();
+  }
+}
+
+func poly_area(points:list[vec[f32,2]]):f32{
+  n := points.length();
+  a := 0.0;
+  p := n-1;
+  for (q:=0; q<n; q++){
+    a += points[p].x*points[q].y - points[q].x*points[p].y;
+    p = q;
+  }
+  return a*0.5;
+}
+
+func unhole(ps:list[list[vec[f32,2]]]):list[list[vec[f32,2]]]{
+  lands := list[list[vec[f32,2]]]{};
+  for (i := 0; i < ps.length(); i++) no_repeat_ends(ps[i]);
+  for (i := 0; i < ps.length(); i++){
+    if (poly_area(ps[i])>0){
+      lands.push(ps[i]);
+    }else if (ps[i].length()){
+      ok := 0;
+      for (j := 0; j < lands.length(); j++){
+        if (geom.pt_in_poly(ps[i][0], lands[j])){
+          lands[j] = bridge(lands[j], ps[i]);
+          ok = 1;
+          break;
+        }
+      }
+      if (!ok) io.println("[warn] orphan hole");
+    }
+  }
+  return lands;
+}
+
+
+func chop(poly:list[vec[f32,2]],x0:f32):tup[list[list[vec[f32,2]]],list[list[vec[f32,2]]]]{
+  isects := list[tup[f32,i32]]{};
+  for (i := 0; i < poly.length(); i++){
+    [b,v] := geom.line_intersect(
+      poly[i], poly[(i+1)%poly.length()],
+      {x0,0},{x0,1},
+      geom.LHS_SEGMENT|geom.RHS_LINE|geom.RET_POINTS
+    );
+    if (b){
+      isects.push([v.y,i]);
+    }
+  }
+  pieces := [
+    list[list[vec[f32,2]]]{},
+    list[list[vec[f32,2]]]{},
+  ];
+  if (!isects.length()){
+    if (poly.length() && poly[0].x < x0){
+      pieces[0].push(poly);
+    }else{
+      pieces[1].push(poly);
+    }
+    return pieces;
+  }
+
+  if (isects.length()%2){
+    return chop(poly,x0+0.0001);
+  }
+  for (lr := 0; lr < 2; lr++){
+    isects.sort(func(a:tup[f32,i32]):f32{
+      p := poly[a[1]];
+      q := poly[(a[1]+1)%poly.length()];
+      return a[0]*(0.5-lr)+((p.x<q.x)-0.5)*(0.5-lr)*0.0001;
+    });
+    mask := arr.make[i32,1]({poly.length()}, -1);
+    for (i := 0; i < isects.length(); i++){
+      mask[isects[i][1]] = i;
+    }
+    cnt := isects.length();
+    
+    while (cnt){
+      i := 0;
+      for (k := 0; k < isects.length(); k++){
+        i = isects[k][1];
+        if (mask[i]<0) continue;
+        break;
+      }
+      buf := list[vec[f32,2]]{};
+      while (1){
+        if (buf.length() && poly[i] == buf[0]){
+          break;
+        }
+        buf.push(poly[i]);
+        if (mask[i]<0){
+          i = (i+1)%poly.length();
+          continue;
+        }
+        idx := mask[i];
+        buf.push({x0,isects[idx][0]});
+        buf.push({x0,isects[idx+1][0]});
+        mask[i]=-1;
+        mask[isects[idx+1][1]]=-1;
+        cnt -= 2;
+        i = (isects[idx+1][1]+1)%poly.length();
+      }
+      if (lr == 0){
+        pieces[0].push(buf);
+      }else{
+        pieces[1].push(buf);
+      }
+    }
+  }
+  return pieces;
+}
+
+func multi_chop(ps:list[list[vec[f32,2]]],x0:f32,x1:f32,step:f32):list[list[list[vec[f32,2]]]]{
+  cur := ps;
+  strips := list[list[list[vec[f32,2]]]]{};
+  for (x := x0; x < x1; x+= step){
+    prv := list[list[vec[f32,2]]]{}
+    nxt := list[list[vec[f32,2]]]{}
+    for (i := 0; i < cur.length(); i++){
+      [L,R] := chop(cur[i],x);
+      prv = prv.concat(L)
+      nxt = nxt.concat(R);
+    }
+    strips.push(prv);
+    cur = nxt;
+  }
+  return strips;
+}
+
+
+a := tf.lookup(229,font.FEAT_NONE);
+g := tf.glyph(a,2);
+gg := unhole(g);
+
+strips := multi_chop(gg,0.0,0.6,0.05);
+
+func scaled(pt:vec[f32,2]):vec[f32,2]{
+  return pt*400.0+{100.0,400.0}
+}
+
+drw.size(512,512);
+while (1){
+  drw.background(0.5);
+  for (k := 0; k < strips.length(); k++){
+    for (i := 0; i < strips[k].length(); i++){
+      drw.fill(1,k*0.1,0.5)
+      drw.begin_shape();
+      for (j := 0; j < strips[k][i].length(); j++){
+        drw.vertex(...scaled(strips[k][i][j]+{k*0.02,0.0}))
+      }
+      drw.end_shape(1);
+    }
+  }
+  drw.poll();
+}
