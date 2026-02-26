@@ -1,0 +1,407 @@
+include "std/font"
+include "std/io"
+include "std/str"
+include "std/list"
+include "std/vec"
+include "std/geom"
+include "std/math"
+include "std/win"
+include "std/time"
+include "std/arr"
+include "std/drw"
+
+bytes := io.read_file("../dither-lang/examples/assets/caslon.ttf");
+tf := font.decode(bytes);
+
+func scaled(pt:vec[f32,2]):vec[f32,2]{
+  return pt*500.0+{100.0,450.0}
+}
+
+// func scaled(pt:vec[f32,2]):vec[f32,2]{
+//   return pt*2000.0+{-250.0,1800.0}
+// }
+
+func bridge(land:list[vec[f32,2]],hole:list[vec[f32,2]]):list[vec[f32,2]]{
+  cands := list[tup[f32,i32,i32]]{};
+  for (i := 0; i < land.length(); i++){
+    for (j := 0; j < hole.length(); j++){
+      cands.push([(land[i]-hole[j]).mag(),i,j])
+    }
+  }
+  cands.sort(func(a:tup[f32,i32,i32]):f32{
+    return a[0];
+  });
+
+  either := list[]{land,hole};
+  
+  for (k := 0; k < cands.length(); k++){
+    [d,i0,i1] := cands[k];
+    ok := 1;
+    for (i := 0; i < either.length(); i++){
+      for (j := 0; j < either[i].length(); j++){
+        j1 := (j+1)%either[i].length();
+        if (i == 0 && (i0 == j || i0 == j1)) continue;
+        if (i == 1 && (i1 == j || i1 == j1)) continue;
+
+        [b,v] := geom.line_intersect(
+          either[i][j],either[i][j1],
+          land[i0],hole[i1],
+          geom.LHS_SEGMENT|geom.RHS_SEGMENT
+        );
+        if (b){
+          ok = 0;
+          break;
+        }
+      }
+      if (!ok) break;
+    }
+    if (ok){
+      return land.slice(0,i0+1).concat(
+        hole.slice(i1,hole.length())
+      ).concat(
+        hole.slice(0,i1+1)
+      ).concat(
+        land.slice(i0,land.length())
+      )
+    }
+  }
+  io.println("[warn] bridge failed");
+  return land.concat(hole);
+}
+
+func no_repeat_ends(p:list[vec[f32,2]]){
+  if (p[0] == p[p.length()-1]){
+    p.pop();
+  }
+}
+
+func poly_area(points:list[vec[f32,2]]):f32{
+  n := points.length();
+  a := 0.0;
+  p := n-1;
+  for (q:=0; q<n; q++){
+    a += points[p].x*points[q].y - points[q].x*points[p].y;
+    p = q;
+  }
+  return a*0.5;
+}
+
+func unhole(ps:list[list[vec[f32,2]]]):list[list[vec[f32,2]]]{
+  lands := list[list[vec[f32,2]]]{};
+  for (i := 0; i < ps.length(); i++) no_repeat_ends(ps[i]);
+  for (i := 0; i < ps.length(); i++){
+    if (poly_area(ps[i])>0){
+      lands.push(ps[i]);
+    }else if (ps[i].length()){
+      ok := 0;
+      for (j := 0; j < lands.length(); j++){
+        if (geom.pt_in_poly(ps[i][0], lands[j])){
+          lands[j] = bridge(lands[j], ps[i]);
+          ok = 1;
+          break;
+        }
+      }
+      if (!ok) io.println("[warn] orphan hole");
+    }
+  }
+  return lands;
+}
+
+
+func cwise(x0:f32,y0:f32,x1:f32,y1:f32,x2:f32,y2:f32):f32{
+  return (((x1)-(x0))*((y2)-(y0)) - ((x2)-(x0))*((y1)-(y0)));
+}
+
+func chop(poly:list[vec[f32,2]],cutter:list[vec[f32,2]]):tup[list[list[vec[f32,2]]],list[list[vec[f32,2]]]]{
+  
+  EPS := 0.00001;
+  poly := poly.slice();
+
+  isects := list[tup[f32,i32,i32]]{};
+  lastside := 0.0000;
+  lastt := -1.0;
+  lasti := -1;
+  for (i := 0; i < poly.length(); i++){
+    loc := list[vec[f32,3]]{};
+    for (j := 0; j < cutter.length(); j++){
+      p0 := poly[i];
+      p1 := poly[(i+1)%poly.length()];
+      q0 := cutter[j];
+      q1 := cutter[(j+1)%cutter.length()];
+      [b,v] := geom.line_intersect(
+        p0,p1,q0,q1,
+        geom.LHS_SEGMENT|geom.RHS_SEGMENT|geom.RET_PARAMS
+      );
+      
+      if (b){
+        side := cwise(...p0,...q0,...q1) - cwise(...p1,...q0,...q1);
+        if ((side>0) != (lastside>0) || math.abs(lastt-1.0-v.x)>0.0001 || i != lasti+1){
+          loc.push({j+v.y,v.x,side});
+        }
+        lastside = side;
+        lastt = v.x;
+        lasti = i;
+      }
+    }
+    if (loc.length()==0){
+      continue;
+    }else if (loc.length()==1){
+      isects.push([loc[0][0],i,loc[0][2]>0]);
+    }else{
+      i0 := i;
+      i1 := (i+1)%poly.length();
+      loc.sort(func(a:vec[f32,3]):f32{
+        return a[1];
+      });
+      isects.push([loc[0][0],i,loc[0][2]>0]);
+      for (j := 0; j < loc.length()-1; j++){
+        t := (loc[j][1] + loc[j+1][1])*0.5;
+
+        p := poly[i0]*(1-t)+poly[i1]*t;
+        isects.push([loc[j+1][0],i+1,loc[j+1][2]>0]);
+        poly.insert(i+1,p);
+        i += 1;
+      }
+    }
+  }
+
+  if (isects.length() & 1){
+    // io.println("redo 1")
+    return chop(poly,cutter.map(func(p:vec[f32,2]):vec[f32,2]{return p+{0.0017391,0.0035519}}));
+  }
+  isects.sort(func(a:tup[f32,i32,i32]):f32{
+    return a[0];
+  });
+  for (i := 0; i < isects.length(); i++){
+    i1 := i+1;
+    v1 := 0.0;
+    if (i1 >= isects.length()){
+      i1 = 0;
+      v1 = isects[i1][0]+isects.length();
+    }else{
+      v1 = isects[i1][0];
+    }
+    if (math.abs(isects[i][0]-v1)>0.001) continue;
+
+    a0 := isects[i];
+    a1 := isects[i1];
+
+    p0 := poly[a0[1]];
+    q0 := poly[(a0[1]+1)%poly.length()];
+
+    p1 := poly[a1[1]];
+    q1 := poly[(a1[1]+1)%poly.length()];
+
+    if (p0 != q1 || p1 != q0) continue;
+
+    if (a0[2] > a1[2]){
+      [isects[i],isects[i1]] = [isects[i1],isects[i]];
+    }
+  }
+  for (i := 0; i < isects.length(); i++){
+    if (isects[i][2] == isects[(i+1)%isects.length()][2]){
+      // io.println("redo 2")
+      return chop(poly,cutter.map(func(p:vec[f32,2]):vec[f32,2]{return p+{0.0017391,0.0035519}}));
+    }
+  }
+  
+
+  pieces := [
+    list[list[vec[f32,2]]]{},
+    list[list[vec[f32,2]]]{},
+  ];
+
+  if (!isects.length()){
+    if (poly.length() && geom.pt_in_poly(poly[0],cutter)){
+      pieces[0].push(poly);
+    }else{
+      pieces[1].push(poly);
+    }
+    return pieces;
+  }
+
+  if (!isects[0][2]){
+    isects.insert(0,isects.pop())
+  }
+  // isects.reverse();
+  // io.println(isects);
+  // isects.insert(0,isects.pop())
+  // isects.insert(0,isects.pop())
+  for (i := 0; i < isects.length(); i++){
+    drw.no_stroke();
+    if (isects[i][2]){
+      drw.fill(1,0,0,0.6);
+    }else{
+      drw.fill(0,0,1,0.6);
+    }
+    t0 := isects[i][0];
+    j0 := t0 as i32;
+    f0 := t0-j0;
+    p0 := cutter[j0] * (1-f0) + cutter[(j0+1)%cutter.length()] * f0;
+    drw.ellipse(...scaled(p0),8,8);
+    drw.ellipse(10,10+i*10,8,8);
+    drw.stroke(0,0.2)
+    drw.line(...scaled(p0),10,10+i*10);
+  }
+  
+  for (lr := 0; lr < 2; lr++){
+    mask := list[i32]{};
+    for (i : = 0; i < poly.length(); i++){
+      mask.push(-1)
+    }
+    for (i := 0; i < isects.length(); i++){
+      mask[isects[i][1]]=i;
+    }
+
+    cnt := isects.length();
+    while (cnt>0){
+      i := 0;
+      for (k := 0; k < isects.length(); k++){
+        i = isects[k][1];
+        if (mask[i]<0) continue;
+        if ((mask[i]&1) != 0) continue;
+        break;
+      }
+
+      buf := list[vec[f32,2]]{};
+      starti := i;
+      while (1){
+        if (buf.length() && i == starti){
+          break;
+        }
+        buf.push(poly[i]);
+        if (mask[i]<0){
+          i = (i+1)%poly.length();
+          continue;
+        }
+        idx := mask[i];
+        idx1 := (idx+1)%isects.length();
+
+        t0 := isects[idx][0];
+        t1 := isects[idx1][0];
+        j0 := t0 as i32;
+        j1 := t1 as i32;
+        f0 := t0-j0;
+        f1 := t1-j1;
+        p0 := cutter[j0] * (1-f0) + cutter[(j0+1)%cutter.length()] * f0;
+        p1 := cutter[j1] * (1-f1) + cutter[(j1+1)%cutter.length()] * f1;
+        buf.push(p0);
+
+
+        if (lr){
+          if (j0 < j1) j0 += cutter.length();
+          for (j := j0; j > j1; j--){
+            buf.push(cutter[j%cutter.length()])
+          }
+        }else{
+          if (j1 < j0) j1 += cutter.length();
+          for (j := j0+1; j <= j1; j++){
+            buf.push(cutter[j%cutter.length()])
+          }
+        }
+        buf.push(p1);
+        mask[i] = -1;
+        mask[isects[idx1][1]] = -1;
+        cnt -= 2;
+        i = (isects[idx1][1]+1)%poly.length();
+      }
+      if (lr == 0){
+        pieces[0].push(buf);
+      }else{
+        pieces[1].push(buf);
+      }
+      // break;
+    }
+    isects.reverse();
+    // break;
+  }
+  return pieces;
+}
+
+func multi_chop(ps:list[list[vec[f32,2]]],cutter:list[vec[f32,2]]):tup[list[list[vec[f32,2]]],list[list[vec[f32,2]]]]{
+  prv := list[list[vec[f32,2]]]{}
+  nxt := list[list[vec[f32,2]]]{}
+  for (i := 0; i < ps.length(); i++){
+    [L,R] := chop(ps[i],cutter);
+    prv = prv.concat(L)
+    nxt = nxt.concat(R);
+  }
+  return [prv,nxt];
+}
+
+
+a := tf.lookup(229,font.FEAT_NONE);
+// a := tf.lookup('a',font.FEAT_NONE);
+g := tf.glyph(a,2);
+gg := unhole(g);
+
+cutter0 := tf.glyph(tf.lookup('t',font.FEAT_NONE),2)[0];
+cutter0.pop();
+
+
+mx := 0.0;
+my := 0.0;
+
+drw.size(512,512);
+while (1){
+  drw.background(0.5);
+
+  cutter := cutter0.map(func(p:vec[f32,2]):vec[f32,2]{return p+{(mx-100)*0.002,(my-400)*0.002}})
+
+  // io.println(cutter);
+
+  drw.stroke(0);
+  drw.no_fill();
+  for (i := 0; i < gg.length(); i++){
+    drw.begin_shape();
+    for (j := 0; j < gg[i].length(); j++){
+      drw.vertex(...(scaled(gg[i][j])-{0.0,0.0}))
+    }
+    drw.end_shape(1);
+  }
+
+  drw.stroke(0);
+  drw.no_fill();
+  drw.begin_shape();
+  for (j := 0; j < cutter.length(); j++){
+    drw.vertex(...(scaled(cutter[j])));
+  }
+  drw.end_shape(1);
+
+  [L,R] := multi_chop(gg,cutter);
+  
+  // for (i := 0; i < gg.length(); i++){
+  //   drw.fill(0);
+  //   for (j := 0; j < gg[i].length(); j++){
+  //     drw.text(j,...(scaled(gg[i][j])-{0.0,0.0}))
+  //   }
+  // }
+
+  drw.stroke(0);
+  for (i := 0; i < L.length(); i++){
+    drw.fill(1,0.5)
+    drw.begin_shape();
+    for (j := 0; j < L[i].length(); j++){
+      drw.vertex(...(scaled(L[i][j])-{0.0,0.0}))
+    }
+    drw.end_shape(1);
+  }
+
+  for (i := 0; i < R.length(); i++){
+    drw.fill(1,0.5,0.5,0.5);
+    drw.begin_shape();
+    [cen,ext,axs] := geom.bbox(R[i],geom.MODE_ALIGNED);
+    d := (cen - {0.285,-0.265}).dir();
+    for (j := 0; j < R[i].length(); j++){
+      drw.vertex(...(scaled(R[i][j])-{0.0,0.0}))
+      // drw.vertex(...(scaled(R[i][j])+d*10.0))
+    }
+    drw.end_shape(1);
+  }
+  
+  e := drw.poll();
+  if (e.type == win.MOUSE_MOVED){
+    mx = e.x;
+    my = e.y;
+  }
+}

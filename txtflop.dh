@@ -1,0 +1,892 @@
+include "std/font"
+include "std/io"
+include "std/frag"
+include "std/rdr"
+include "std/str"
+include "std/list"
+include "std/vec"
+include "std/geom"
+include "std/math"
+include "std/win"
+include "std/time"
+include "std/arr"
+include "std/rand"
+include "../dither-plugins/ode"
+
+MAX_CONTACT := 4;
+DBG := 0;
+ode.InitODE();
+world := ode.WorldCreate();
+ode.WorldSetGravity(world, 0.0, 0.0, -9.81);
+ode.WorldSetCFM(world, 1e-4);
+ode.WorldSetERP(world, 0.2);
+space := ode.HashSpaceCreate(0);
+contactgroup := ode.JointGroupCreate(0);
+ode.CreatePlane(space, 0, 0, 1, 0);
+surf := ode.SurfaceParameters{};
+surf.mode(ode.ContactBounce);
+surf.mu(2.0);
+surf.bounce(0.2);
+surf.bounce_vel(0.2);
+
+bytes := io.read_file("../dither-lang/examples/assets/caslon.ttf");
+tf := font.decode(bytes);
+
+func bridge(land:list[vec[f32,2]],hole:list[vec[f32,2]]):list[vec[f32,2]]{
+  cands := list[tup[f32,i32,i32]]{};
+  for (i := 0; i < land.length(); i++){
+    for (j := 0; j < hole.length(); j++){
+      cands.push([(land[i]-hole[j]).mag(),i,j])
+    }
+  }
+  cands.sort(func(a:tup[f32,i32,i32]):f32{
+    return a[0];
+  });
+
+  either := list[]{land,hole};
+  
+  for (k := 0; k < cands.length(); k++){
+    [d,i0,i1] := cands[k];
+    ok := 1;
+    for (i := 0; i < either.length(); i++){
+      for (j := 0; j < either[i].length(); j++){
+        j1 := (j+1)%either[i].length();
+        if (i == 0 && (i0 == j || i0 == j1)) continue;
+        if (i == 1 && (i1 == j || i1 == j1)) continue;
+
+        [b,v] := geom.line_intersect(
+          either[i][j],either[i][j1],
+          land[i0],hole[i1],
+          geom.LHS_SEGMENT|geom.RHS_SEGMENT
+        );
+        if (b){
+          ok = 0;
+          break;
+        }
+      }
+      if (!ok) break;
+    }
+    if (ok){
+      return land.slice(0,i0+1).concat(
+        hole.slice(i1,hole.length())
+      ).concat(
+        hole.slice(0,i1+1)
+      ).concat(
+        land.slice(i0,land.length())
+      )
+    }
+  }
+  io.println("[warn] bridge failed");
+  return land.concat(hole);
+}
+
+func no_repeat_ends(p:list[vec[f32,2]]){
+  if (p[0] == p[p.length()-1]){
+    p.pop();
+  }
+}
+
+func poly_area(points:list[vec[f32,2]]):f32{
+  n := points.length();
+  a := 0.0;
+  p := n-1;
+  for (q:=0; q<n; q++){
+    a += points[p].x*points[q].y - points[q].x*points[p].y;
+    p = q;
+  }
+  return a*0.5;
+}
+
+func unhole(ps:list[list[vec[f32,2]]]):list[list[vec[f32,2]]]{
+  lands := list[list[vec[f32,2]]]{};
+  for (i := 0; i < ps.length(); i++) no_repeat_ends(ps[i]);
+  for (i := 0; i < ps.length(); i++){
+    if (poly_area(ps[i])>0){
+      lands.push(ps[i]);
+    }else if (ps[i].length()){
+      ok := 0;
+      for (j := 0; j < lands.length(); j++){
+        if (geom.pt_in_poly(ps[i][0], lands[j])){
+          lands[j] = bridge(lands[j], ps[i]);
+          ok = 1;
+          break;
+        }
+      }
+      if (!ok) io.println("[warn] orphan hole");
+    }
+  }
+  return lands;
+}
+
+func chop(poly:list[vec[f32,2]],x0:f32):tup[list[list[vec[f32,2]]],list[list[vec[f32,2]]]]{
+  isects := list[tup[f32,i32,i32]]{};
+  for (i := 0; i < poly.length(); i++){
+    a := poly[i];
+    b := poly[(i+1)%poly.length()];
+    if (a.x <= x0 && b.x > x0){
+      t := (x0-a.x)/(b.x-a.x);
+      isects.push([ a.y * (1-t) + b.y * t,i,0]);
+    }else if (a.x >= x0 && b.x < x0){
+      t := (x0-a.x)/(b.x-a.x);
+      isects.push([ a.y * (1-t) + b.y * t,i,1]);
+    }
+  }
+
+  pieces := [
+    list[list[vec[f32,2]]]{},
+    list[list[vec[f32,2]]]{},
+  ];
+  if (!isects.length()){
+    if (poly.length() && poly[0].x < x0){
+      pieces[0].push(poly);
+    }else{
+      pieces[1].push(poly);
+    }
+    return pieces;
+  }
+
+  if (isects.length()%2){
+    return chop(poly,x0+0.0001);
+  }
+  isects.sort(func(a:tup[f32,i32,i32]):f32{
+    return a[0];
+  });
+
+  for (i := 0; i < isects.length()-1; i++){
+    if (math.abs(isects[i][0]-isects[i+1][0])>0.001) continue;
+
+    a0 := isects[i];
+    a1 := isects[i+1];
+
+    p0 := poly[a0[1]];
+    q0 := poly[(a0[1]+1)%poly.length()];
+
+    p1 := poly[a1[1]];
+    q1 := poly[(a1[1]+1)%poly.length()];
+
+    if (p0 != q1 || p1 != q0) continue;
+
+    if (a0[2] > a1[2]){
+      [isects[i],isects[i+1]] = [isects[i+1],isects[i]]
+    }
+  }
+
+  for (i := 0; i < isects.length(); i++){
+    if (isects[i][2] == isects[(i+1)%isects.length()][2]){
+      return chop(poly,x0+0.0001);
+    }
+  }
+
+  for (lr := 0; lr < 2; lr++){
+    mask := arr.make[i32,1]({poly.length()}, -1);
+    for (i := 0; i < isects.length(); i++){
+      mask[isects[i][1]] = i;
+    }
+    cnt := isects.length();
+
+    while (cnt){
+      i := 0;
+      ok := 0;
+      for (k := 0; k < isects.length(); k++){
+        i = isects[k][1];
+        if (mask[i]<0) continue;
+        ok = 1;
+        break;
+      }
+
+      buf := list[vec[f32,2]]{};
+      starti := i;
+      while (1){
+        if (buf.length() && i == starti){
+          break;
+        }
+        buf.push(poly[i]);
+        if (mask[i]<0){
+          i = (i+1)%poly.length();
+          continue;
+        }
+        idx := mask[i];
+        buf.push({x0,isects[idx][0]});
+        buf.push({x0,isects[idx+1][0]});
+        mask[i]=-1;
+        mask[isects[idx+1][1]]=-1;
+        cnt -= 2;
+        i = (isects[idx+1][1]+1)%poly.length();
+      }
+      if (lr == 0){
+        pieces[0].push(buf);
+      }else{
+        pieces[1].push(buf);
+      }
+    }
+    isects.reverse();
+  }
+  return pieces;
+}
+
+func multi_chop(ps:list[list[vec[f32,2]]],x0:f32,x1:f32,step:f32):list[list[list[vec[f32,2]]]]{
+  cur := ps;
+  strips := list[list[list[vec[f32,2]]]]{};
+  for (x := x0; x < x1; x+= step){
+    prv := list[list[vec[f32,2]]]{}
+    nxt := list[list[vec[f32,2]]]{}
+    for (i := 0; i < cur.length(); i++){
+      [L,R] := chop(cur[i],x);
+      prv = prv.concat(L)
+      nxt = nxt.concat(R);
+    }
+    strips.push(prv);
+    cur = nxt;
+  }
+  strips.push(cur);
+  return strips;
+}
+
+
+
+func extrude_glyph(mesh:rdr.Mesh,g:list[list[vec[f32,2]]],x0:f32,y0:f32,thick:f32){
+  
+  qs := unhole(g);
+  l0 := math.INF;
+  l1 := -math.INF;
+  for (i := 0; i < qs.length(); i++){
+    for (j := 0; j < qs[i].length(); j++){
+      l0 <?= qs[i][j].x;
+      l1 >?= qs[i][j].x;
+    }
+  }
+  step := 0.05;
+  l0 += step+0.001;
+  strips := multi_chop(qs,l0,l1,step);
+
+  P := list[vec[f32,2]]{};
+  for (k := 0; k < strips.length(); k++){
+    for (i := 0; i < strips[k].length(); i++){
+      tris := geom.triangulate(strips[k][i]);
+      for (j := 0; j < tris.length(); j+=3){
+        P.push(strips[k][i][tris[j]]);
+        P.push(strips[k][i][tris[j+1]]);
+        P.push(strips[k][i][tris[j+2]]);
+      }
+    }
+  }
+
+  for (i := 0; i < P.length(); i++){
+    mesh.vertices.push({
+      x0+P[i].x, y0-P[i].y, thick*0.5
+    })
+    mesh.normals.push({0.,0,1});
+  }
+  for (i := P.length()-1; i >= 0; i--){
+    mesh.vertices.push({
+      x0+P[i].x, y0-P[i].y, -thick*0.5
+    })
+    mesh.normals.push({0.,0,-1});
+  }
+  for (i := 0; i < g.length(); i++){
+    gr := list[vec[f32,2]]{};
+    for (j := 0; j < g[i].length(); j++){
+      a := g[i][j];
+      b := g[i][(j+1)%g[i].length()];
+      gr.push(a);
+      cnt := gr.length();
+      for (x := l0; x < l1; x += step){
+        [pred,v] := geom.line_intersect(
+          a,b, {x,0.},{x,1.}, 
+          geom.LHS_SEGMENT|geom.RHS_LINE|geom.RET_POINTS
+        );
+        if (pred){
+          if (a.x < b.x){
+            gr.push(v);
+          }else{
+            gr.insert(cnt,v);
+          }
+        }
+      }
+    }
+
+    np := gr.length();
+    for (j := 0; j < np; j++){
+      pz := gr[(j-1+np)%np];
+      p0 := gr[j];
+      p1 := gr[(j+1)%np];
+      p2 := gr[(j+2)%np];
+      z := {x0+pz.x, y0-pz.y, thick*0.5}
+      a := {x0+p0.x, y0-p0.y, thick*0.5}
+      b := {x0+p1.x, y0-p1.y, thick*0.5}
+      c := {x0+p0.x, y0-p0.y,-thick*0.5}
+      d := {x0+p1.x, y0-p1.y,-thick*0.5}
+      e := {x0+p2.x, y0-p2.y, thick*0.5}
+      mesh.vertices.push(a);
+      mesh.vertices.push(b);
+      mesh.vertices.push(c); 
+      mesh.vertices.push(b);
+      mesh.vertices.push(d);
+      mesh.vertices.push(c);
+      /*
+        z a b e
+          c d
+      */
+      nml  := (b-a).cross(c-b).dir();
+      nml0 := (a-z).cross(c-a).dir()*0.5+nml*0.5;
+      nml1 := (d-b).cross(b-e).dir()*0.5+nml*0.5;
+
+      mesh.normals.push(nml0);
+      mesh.normals.push(nml1);
+      mesh.normals.push(nml0);
+      mesh.normals.push(nml1);
+      mesh.normals.push(nml1);
+      mesh.normals.push(nml0);
+    }
+  }
+}
+
+
+func make_mesh(s:str,thick:f32):rdr.Mesh{
+  mesh := rdr.Mesh{};
+  offs := list[f32]{};
+  ids := list[i32]{};
+  for (i := 0; i < s.length()+1; i++){
+    a := 0;
+    if (i < s.length()){
+      a = tf.lookup(s[i],font.FEAT_NONE);
+      ids.push(a);
+    }
+    if (i){
+      offs.push(offs[i-1]+tf.advance(ids[i-1],a,font.FEAT_KERN));
+    }else{
+      offs.push(0.0);
+    }
+  }
+  for (i := 0; i < s.length(); i++){
+    g := tf.glyph(ids[i],2);
+    extrude_glyph(
+      mesh,g,
+      offs[i]-offs[offs.length()-1]*0.5,
+      -0.3,
+      thick
+    );
+  }
+  return mesh;
+}
+
+
+func make_wireframe(mesh:rdr.Mesh):rdr.Mesh{
+  wire := rdr.Mesh{
+    mode: rdr.MODE_LINE_LIST,
+    vertices: mesh.vertices,
+  };
+  for (i := 0; i < mesh.vertices.length(); i+=3){
+    wire.indices.push(i);
+    wire.indices.push(i+1);
+    wire.indices.push(i+1);
+    wire.indices.push(i+2);
+    wire.indices.push(i+2);
+    wire.indices.push(i);
+    wire.colors.push({0.,0,0,1})
+    wire.colors.push({0.,0,0,1})
+    wire.colors.push({0.,0,0,1})
+  }
+  return wire;
+}
+
+
+func update_mesh(mesh:rdr.Mesh,t_verts:list[vec[f32,3]],t_norms:list[vec[f32,3]],w:f32,curv:list[vec[f32,4]]){
+  N := curv.length();
+  for (i := 0; i < mesh.vertices.length(); i++){
+    p0 := t_verts[i];
+    n0 := t_norms[i];
+    t := (p0.x + w*0.5)/w;
+    i0 : i32 = math.floor(t*N);
+    if (i0 >= N-1) i0=N-2;
+    i1 : i32 = i0 + 1;
+    f : f32 = (t*N-i0);
+    p := curv[i0].xy * (1-f) + curv[i1].xy * f;
+    costh := curv[i0].z;
+    sinth := curv[i0].w;
+    mesh.vertices[i] = {
+      p.x-sinth*p0.z,
+          p0.y,
+      p.y+costh*p0.z 
+    };
+    mesh.normals[i] = {
+      costh*n0.x-sinth*n0.z,
+      n0.y,
+      sinth*n0.x+costh*n0.z
+    };
+  }
+}
+
+
+
+typedef MeshObj = {
+  mesh : rdr.Mesh;
+  wire : rdr.Mesh;
+  dims : vec[f32,3];
+  t_verts : list[vec[f32,3]];
+  t_norms : list[vec[f32,3]];
+  bodies : list[u64];
+  joints : list[u64];
+  seg_w : f32;
+}
+
+objs := list[MeshObj]{}
+
+func drop_box(text:str,pos:vec[f32,3]){
+  dims := {0.0, 1.0, 0.25}
+  mesh := make_mesh(text,dims.z-0.02);
+  bb := geom.bbox(mesh.vertices,geom.MODE_ALIGNED);
+  w := bb[1].x*2.0;
+  cx := bb[0].x;
+  for (i := 0; i < mesh.vertices.length(); i++){
+    mesh.vertices[i] -= {cx,0.0,0.0};
+  }
+  dims += {w, 0.0, 0.0};
+
+  t_verts := mesh.vertices.slice();
+  t_norms := mesh.normals.slice();
+
+  bodies := list[u64]{};
+  joints := list[u64]{};
+  rot := rand.random(math.PI);
+  sinth := math.sin(rot);
+  costh := math.cos(rot);
+
+  n : i32 = dims.x/0.2;
+  if (!(n % 2)) n++;
+  if (n < 3) n = 3;
+  for (i := 0; i < n; i++){
+    body := ode.BodyCreate(world);
+    ode.BodySetAngularDamping(body, 0.05);
+    mass:=list[]{ode.Mass{}}
+    ode.MassSetBox(mass, 1.0, dims.x/n, dims.y, dims.z);
+    ode.BodySetMass(body, mass);
+    geom := ode.CreateBox(space, dims.x/n-0.03, dims.y, dims.z);
+    ode.GeomSetBody(geom, body);
+    d := dims.x*i/(n as f32)-dims.x*0.5;
+    ode.BodySetPosition(body, pos.x+d*costh,pos.y+d*sinth,pos.z);
+    ode.BodySetRotation(body, list[f32]{costh,-sinth,0.0,0.0, sinth,costh,0.0,0.0, 0.0,0.0,1.0,0.0})
+
+    if (i){
+      jnt := ode.JointCreateHinge(world, 0);
+      prv := bodies[bodies.length()-1];
+      ode.JointAttach(jnt, prv, body);
+      d = dims.x*i/(n as f32)-dims.x*0.5-dims.x*0.5/(n as f32);
+      ode.JointSetHingeAnchor(jnt, pos.x+d*costh, pos.y+d*sinth, pos.z);
+      ode.JointSetHingeAxis(jnt, -sinth, costh, 0);
+      joints.push(jnt);
+    }
+    bodies.push(body);
+  }
+  wire := make_wireframe(mesh);
+  mesh.update(0xff);
+  wire.update(0xff);
+
+  obj := MeshObj{
+    mesh: mesh,
+    dims: dims,
+    t_verts : t_verts,
+    t_norms : t_norms,
+    bodies : bodies,
+    joints : joints,
+    wire : wire,
+  };
+
+  objs.push(obj);
+}
+
+func near_callback(data:u64, o1:u64, o2:u64){
+  geoms := list[ode.ContactGeom]{};
+  for (i := 0; i < MAX_CONTACT; i++) geoms.push(ode.ContactGeom{})
+  
+  numc := ode.Collide(o1,o2,geoms.length(),geoms,geoms[0].sizeof());
+  for (i := 0; i < numc; i++){
+    contact := ode.Contact{};
+    contact.geom(geoms[i]);
+    contact.surface(surf);
+    c := ode.JointCreateContact(world, contactgroup, list[]{contact});
+    ode.JointAttach(c, ode.GeomGetBody(o1), ode.GeomGetBody(o2));
+  }
+}
+
+W := 640
+H := 480
+context := win.init(W,H,win.CONTEXT_3D)
+rdr.init(context);
+frag.init(context);
+
+wbox := rdr.Mesh{
+  mode:rdr.MODE_LINE_LIST,
+  vertices:list[vec[f32,3]]{
+    {-1.,-1,-1},{1.,-1,-1},{1.,1,-1},{-1.,1,-1},
+    {-1.,-1,1},{1.,-1,1},{1.,1,1},{-1.,1,1},
+  },
+  indices:list[i32]{
+    0,1, 1,2, 2,3, 3,0,
+    4,5, 5,6, 6,7, 7,4,
+    0,4, 1,5, 2,6, 3,7
+  },
+}
+
+plane := rdr.Mesh{
+  vertices:list[vec[f32,3]]{
+    {-5,0,-5},{5,0,-5},{5,0,5},{-5,0,5}
+  },
+  indices:list[i32]{
+    0,1,2, 0,2,3
+  },
+  normals:list[vec[f32,3]]{
+    {0,1,0},{0,1,0},{0,1,0},{0,1,0}
+  },
+  uvs:list[vec[f32,2]]{
+    {0,0},{1,0},{1,1},{0,1}
+  }
+}
+
+normal_material := frag.program(embed (func(
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+):vec[f32,4]{
+  c := normal*0.5+0.5;
+  return {c.x,c.y,c.z,1.0};
+}) as "fragment");
+
+shadow_material := frag.program(embed(func(
+  @builtin frag_coord:vec[f32,4],
+  @varying normal:vec[f32,3]
+):vec[f32,4]{
+  c := frag_coord.z;
+  return {c,c,c,1.0};
+}) as "fragment");
+
+phong_material := frag.program(embed (func(
+  @varying normal : vec[f32,3],
+  @varying position : vec[f32,3],
+  @uniform eye : vec[f32,3],
+  @uniform l_dir : vec[f32,3],
+  @varying uv:vec[f32,2],
+  @builtin frag_coord : vec[f32,4],
+  @derived d_position_dx : vec[f32,3],
+  @derived d_position_dy : vec[f32,3],
+  @derived d_uv_dx : vec[f32,2],
+  @derived d_uv_dy : vec[f32,2],
+  @uniform col_diff : vec[f32,3],
+  @uniform col_spec : vec[f32,3],
+  @uniform col_ambi : vec[f32,3],
+  @uniform shininess : f32,
+  @uniform shadow_map:frag.Texture,
+  @uniform shadow_matrix:vec[f32,4,4],
+):vec[f32,4]{
+
+  view_dir := eye - position;
+  half_vec := (l_dir + view_dir).dir();
+  ndl := math.max(normal.dot(l_dir),0.0);
+  ndh := math.max(normal.dot(half_vec),0.0);
+
+  col := col_diff;
+  diff := col * ndl;
+  ambi := col * col_ambi;
+  spec := col_spec * (ndh ** shininess);
+  color := diff+ambi+spec;
+
+  bias := math.min(math.max(0.03*math.tan(math.acos(ndl)),0.0),0.3)+0.01;
+  shadow_coord := (shadow_matrix @* {position.x,position.y,position.z,1.0}).xyzw;
+  sh := (shadow_coord.xyz/shadow_coord.w)*0.5+0.5;
+  lam := math.max(ndl,0.0)*0.5+0.5;
+  c := {lam,lam,lam}
+  samp := 1.0;
+  for (i:=-2; i<=2; i++){
+    for (j:=-2; j<=2; j++){
+      if (shadow_map.sample(sh.xy+{(i as f32),j}*0.001).x<sh.z-bias){
+        samp -= 0.03;
+      }
+    }
+  }
+  color *= samp;
+  return {...color,1.0};
+}) as "fragment")
+
+floor_material := frag.program(embed(func(
+  @varying normal:vec[f32,3],
+  @varying uv:vec[f32,2],
+  @varying position:vec[f32,3],
+  @uniform shadow_map:frag.Texture,
+  @uniform shadow_matrix:vec[f32,4,4],
+):vec[f32,4]{
+  bias := 0.01;
+
+  shadow_coord := (shadow_matrix @* {position.x,position.y,position.z,1.0}).xyzw;
+  sh := (shadow_coord.xyz/shadow_coord.w)*0.5+0.5;
+  
+  samp := 1.0;
+  for (i:=-2; i<=2; i++){
+    for (j:=-2; j<=2; j++){
+      if (shadow_map.sample(sh.xy+{(i as f32),j}*0.001).x<sh.z-bias){
+        samp -= 0.015;
+      }
+    }
+  }
+  return {0.,0.,0.,1.0-samp};
+}) as "fragment");
+
+cam := rdr.Camera{};
+cam.perspective(60,W/(H as f32),0.01,100.0);
+
+hud := rdr.Camera{};
+hud.ortho(0,W,H,0,-1,1);
+
+yaw := 0.0;
+pitch := math.PI/4;
+zoom := 5.0;
+drag := {0.,0.,0.};
+targ := {0.,0.5,0.};
+keys_held := dict[i32,i32]{};
+
+l_dir := {1.0,3.0,2.0}.dir();
+
+dt := 0.02;
+frame := 0;
+transforms := list[vec[f32,4,4]]{};
+
+yzup := {
+ 1., 0.,0.,0;
+ 0., 0.,1.,0;
+ 0.,-1.,0.,0;
+ 0., 0.,0.,1;
+}
+
+light := rdr.Camera{};
+light.look_at(l_dir,{0.,0,0},rdr.AXIS_Y);
+light.ortho(-6,6,-6,6,-5,10);
+
+shadow := frag.texture(1024,1024);
+
+strings := " ".join("Double, double toil and trouble;
+Fire burn and caldron bubble.
+Fillet of a fenny snake,
+In the caldron boil and bake;
+Eye of newt and toe of frog,
+Wool of bat and tongue of dog,
+Adder's fork and blind-worm's sting,
+Lizard's leg and howlet's wing,
+For a charm of powerful trouble,
+Like a hell-broth boil and bubble.
+Double, double toil and trouble;
+Fire burn and caldron bubble.
+Cool it with a baboon's blood,
+Then the charm is firm and good.".split("\n")).split(" ");
+
+sidx := 0;
+
+while (1){
+  framerate := time.fps(120);
+  rdr.background(0.2);
+
+  if (frame % 60 == 0 && sidx < strings.length()){
+    drop_box(strings[sidx], rand.random({-2.,-2.,2.5},{2.,2.,3.})+{0.,0.,objs.length()*0.05});
+    sidx ++;
+    // sidx %= strings.length();
+  }
+
+  eye := {
+    math.cos(pitch)*math.sin(yaw),
+    math.sin(pitch),
+    math.cos(pitch)*math.cos(yaw)
+  }*zoom;
+  horz := eye.cross({0,1.,0}).dir();
+  vert := eye.cross(horz).dir();
+  cam.look_at(eye+targ,targ,rdr.AXIS_Y);
+
+  ode.SpaceCollide(space, 0, near_callback);
+  ode.WorldQuickStep(world, dt);
+  ode.JointGroupEmpty(contactgroup);
+
+  for (i := 0; i < objs.length(); i++){
+    nbd := objs[i].bodies.length();
+    curv := list[vec[f32,2]]{};
+    imid : i32 = nbd/2;
+    pmid := ode.BodyGetPosition(objs[i].bodies[imid]);
+    rmid := ode.BodyGetRotation(objs[i].bodies[imid]);
+    tinv := {
+      rmid[0],rmid[4],rmid[8],0;
+      rmid[1],rmid[5],rmid[9],0;
+      rmid[2],rmid[6],rmid[10],0;
+      0,0,0,1;
+    } @* rdr.mat.translate(-pmid[0],-pmid[1],-pmid[2]);
+
+    mtrf := yzup @* {
+      rmid[0],rmid[1],rmid[2],pmid[0];
+      rmid[4],rmid[5],rmid[6],pmid[1];
+      rmid[8],rmid[9],rmid[10],pmid[2];
+      0.,0.,0.,1.;
+    } @* rdr.mat.scale(1.0)
+
+    if (i >= transforms.length()){
+      transforms.push(mtrf);
+    }else{
+      transforms[i] = mtrf;
+    }
+    
+    for (j := 0; j < nbd; j++){
+      pos := ode.BodyGetPosition(objs[i].bodies[j]);
+      rot := ode.BodyGetRotation(objs[i].bodies[j]);
+      trf := {
+        rot[0],rot[1],rot[2],pos[0];
+        rot[4],rot[5],rot[6],pos[1];
+        rot[8],rot[9],rot[10],pos[2];
+        0.,0.,0.,1.;
+      };
+
+      if (j == 0){
+        curv.push((tinv @* trf @* {-objs[i].dims.x*0.5/nbd;0.0;0.0;1.0}).xz);
+      }
+      curv.push((tinv @* trf @* {objs[i].dims.x*0.5/nbd;0.0;0.0;1.0}).xz);
+
+      wmat := yzup @* trf @* rdr.mat.scale(objs[i].dims.x*0.5/nbd, objs[i].dims.y*0.5, objs[i].dims.z*0.5);
+
+      if (DBG&1){
+        cam.begin();
+        wbox.draw(wmat);
+        cam.end();
+      }
+    }
+    N := 500;
+    pms := list[f32]{0.75};
+    res := list[vec[f32,2]]{};
+    for (i:=0;i<curv.length()-1;i++){
+      i0 := i-1;
+      if (i0 < 0) i0 = 0;
+      i1 := i+2;
+      if (i1 > curv.length()-1) i1--;
+      pts := list[vec[f32,2]]{
+        curv[i0], 
+        curv[i], 
+        curv[i+1], 
+        curv[i1]
+      };
+      for (t:=0.0; t<1.0; t+=0.05){
+        v := geom.curve(pts, pms, t, geom.TYPE_CATROM);
+        res.push(v);
+      }
+    }
+    res = geom.poly_resample(res, N, geom.MODE_POLYLINE|geom.BY_COUNT);
+    xycs := list[vec[f32,4]]{};
+    for (j := 0; j < res.length(); j++){
+      p0 := j?(res[j-1]):(res[j]*2-res[j+1]);
+      p1 := res[j];
+      d := (p1 - p0).dir();
+      xycs.push({res[j].x,res[j].y,d.x,d.y});
+    }
+
+    update_mesh(objs[i].mesh, objs[i].t_verts, objs[i].t_norms, objs[i].dims.x, xycs);
+  }
+
+  for (i := 0; i < objs.length(); i++){
+    objs[i].mesh.update(rdr.DIRTY_VERTICES|rdr.DIRTY_NORMALS);
+    objs[i].wire.update(rdr.DIRTY_VERTICES|rdr.DIRTY_NORMALS);
+  }
+
+
+  frag.begin(shadow_material,shadow);
+  rdr.background(0.0);
+  light.begin();
+  for (i := 0; i < objs.length(); i++){
+    objs[i].mesh.draw(transforms[i]);
+  }
+  plane.draw(rdr.mat.scale(2.0));
+  light.end();
+  frag.end();
+
+  shadow_matrix := light.proj@*light.view;
+
+  // frag.begin(normal_material);
+  // cam.begin();
+  // for (i := 0; i < objs.length(); i++){
+  //   objs[i].mesh.draw(transforms[i]);
+  // }
+  // cam.end();
+  // frag.end();
+
+  if (DBG&2){
+    cam.begin();
+    for (i := 0; i < objs.length(); i++){
+      objs[i].wire.draw(rdr.mat.translate(...(eye.dir()*0.01))@*transforms[i]);
+    }
+    cam.end();
+  }
+
+  frag.begin(phong_material);
+  frag.uniform("l_dir",l_dir);
+  frag.uniform("eye",eye+targ);
+  frag.uniform("shininess",32.0);
+  frag.uniform("col_ambi",{0.1,0.2,0.3});
+  frag.uniform("col_spec",{0.6,0.4,0.3});
+  frag.uniform("shadow_map",shadow);
+  frag.uniform("shadow_matrix",shadow_matrix);
+  cam.begin();
+  for (i := 0; i < objs.length(); i++){
+    t := (i%4)*0.3333;
+    // frag.uniform("col_diff",{0.5,0.5,1.0}*(1-t)+{0.5,1.0,0.5}*t);
+    color := {1.0,0.9,0.9};
+    if (i % 3 == 1 && objs[i].dims.x > 2.0){
+      color = {1.0,0.1,0.0};
+    }
+    frag.uniform("col_diff",color);
+    objs[i].mesh.draw(transforms[i]);
+  }
+  cam.end();
+  frag.end();
+
+  frag.begin(floor_material);
+  cam.begin();
+  frag.uniform("shadow_map",shadow);
+  frag.uniform("shadow_matrix",shadow_matrix);
+  plane.draw(rdr.mat.id);
+  cam.end();
+  frag.end();
+
+
+  hud.begin();
+  rdr.text(
+    " [LMB-DRAG] ROTATE  [RMB-DRAG/SHIFT-DRAG] PAN  [WHEEL] ZOOM  #FLOP:%{objs.length()} FPS:%{framerate as i32}     ",
+    rdr.mat.translate(0,H-16,0)
+  );
+  hud.end();
+
+
+  e := win.poll();
+  if (e.type == win.MOUSE_PRESSED){
+    drag = {e.x,e.y,(e.key==win.MOUSE_RIGHT || keys_held[win.KEY_LSHIFT as i32])?-1.0:1.0};
+  }else if (e.type == win.MOUSE_RELEASED){
+    drag = {e.x,e.y,0.0};
+  }else if (e.type == win.MOUSE_MOVED){
+    if (drag.z){
+      dx := drag.x - e.x;
+      dy := drag.y - e.y;
+      if (drag.z > 0){
+        yaw -= dx*0.01;
+        pitch -= dy*0.01;
+        pitch = math.min(math.max(pitch,-math.PI/2+0.01),math.PI/2-0.01);
+      }else{
+        targ -= horz * dx*0.005*zoom - vert * dy*0.005*zoom;
+      }
+      drag = {e.x,e.y,drag.z};
+    }
+  }else if (e.type == win.WHEEL_SCROLLED){
+    zoom += e.y*0.01;
+    if (zoom < 0.1){
+      zoom = 0.1;
+    }else if (zoom > 100.0){
+      zoom = 100.0;
+    }
+  }else if (e.type == win.KEY_PRESSED){
+    keys_held[e.key] = 1;
+    if (e.key == 'd'){
+      DBG = (DBG+1)%4;
+    }
+  }else if (e.type == win.KEY_RELEASED){
+    keys_held[e.key] = 0;
+  }
+  frame++;
+}
+
