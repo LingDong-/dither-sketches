@@ -1,0 +1,493 @@
+include "std/math"
+include "std/rand"
+include "std/list"
+include "std/io"
+include "std/drw"
+include "std/str"
+
+
+OP_CLIP := 1
+OP_POLY := 2
+typedef Shape = {
+  type := 0;
+  poly := list[vec[f32,2]]{};
+}
+shapes := list[Shape]{};
+
+W := 2400
+H := 300
+
+FAR := H*0.28;
+NEAR := H*1.2;
+
+func building(x:f32,y:f32){
+  ww := 20.0;
+  fh := 25.0;
+  dist = (y-FAR)/(NEAR-FAR);
+  nw := rand.random[i32](3,6);
+  w := nw*ww*dist;
+  nf := rand.random[i32](2,5);
+
+  wht := rand.random[i32](0,3);
+  wvt := rand.random[i32](0,3);
+
+  if (rand.random()<0.05 && nw < 5){
+    nf *= rand.random[i32](2,5);
+    wht = 1;
+    wvt = 0;
+  }
+
+  h := nf*fh*dist;
+  
+  d := rand.random(30.0,50.0)*dist;
+
+  tip := (y-h-FAR)*0.002*d;
+
+  // 5____6
+  //  |\  \
+  //  | \2_\3
+  //  | |  |
+  // 4| |0 |1
+
+  p0 := {x,y};
+  p1 := {x+w,y};
+  p2 := {x,y-h};
+  p3 := {x+w,y-h};
+  p4 := {x-d,y};
+  p5 := {x-d,y-h-tip};
+  p6 := {x+w-d,y-h-tip};
+
+  if (p2.y > p5.y+2.0){
+    shapes.push(Shape{
+      type: OP_CLIP,
+      poly: list[vec[f32,2]]{p4,p5,p6,p3,p1}
+    });
+    shapes.push(Shape{
+      type: OP_POLY,
+      poly: list[vec[f32,2]]{p5,p6,p3}
+    });
+  }else{
+    shapes.push(Shape{
+      type: OP_CLIP,
+      poly: list[vec[f32,2]]{p4,p5,p2,p3,p1}
+    });
+  }
+  shapes.push(Shape{
+    type: OP_POLY,
+    poly: list[vec[f32,2]]{p4,p5,p2}
+  });
+  shapes.push(Shape{
+    type: OP_POLY,
+    poly: list[vec[f32,2]]{p0,p2,p3,p1}
+  });
+
+  if (dist > 0.2){
+
+    if (wht){
+      for (i := 1; i < nf; i++){
+        if (wvt == 0){
+          shapes.push(Shape{
+            type: OP_POLY,
+            poly: list[vec[f32,2]]{p2 + {0.0,i*fh-4}*dist, p2 + {nw*ww,i*fh-4}*dist}
+          });
+          shapes.push(Shape{
+            type: OP_POLY,
+            poly: list[vec[f32,2]]{p2 + {0.0,i*fh+4}*dist, p2 + {nw*ww,i*fh+4}*dist}
+          });
+          continue;
+        }
+        for (j := 0; j < nw; j++){
+          shapes.push(Shape{
+            type: OP_POLY,
+            poly: list[vec[f32,2]]{p2 + {j*ww,i*fh-4}*dist, p2 + {j*ww+ww,i*fh-4}*dist}
+          });
+        }
+      }
+    }
+
+    if (wvt){
+      for (j := 1; j < nw; j++){
+        if (wht == 0){
+          shapes.push(Shape{
+            type: OP_POLY,
+            poly: list[vec[f32,2]]{p2 + {j*ww-4,0.0}*dist, p2 + {j*ww-4,nf*fh}*dist}
+          });
+          shapes.push(Shape{
+            type: OP_POLY,
+            poly: list[vec[f32,2]]{p2 + {j*ww+4,0.0}*dist, p2 + {j*ww+4,nf*fh}*dist}
+          });
+          continue;
+        }
+        for (i := 0; i < nf; i++){
+          shapes.push(Shape{
+            type: OP_POLY,
+            poly: list[vec[f32,2]]{p2 + {j*ww-4,i*fh+4}*dist, p2 + {j*ww-4,i*fh+fh-4}*dist}
+          });
+          shapes.push(Shape{
+            type: OP_POLY,
+            poly: list[vec[f32,2]]{p2 + {j*ww+4,i*fh+4}*dist, p2 + {j*ww+4,i*fh+fh-4}*dist}
+          });
+        }
+      }
+    }
+  }
+
+}
+
+
+
+func tree(x:f32,y:f32){
+  
+  dist = (y-FAR)/(NEAR-FAR);
+
+  n := 20*dist+40;
+  tw := rand.random(30.0,80.0);
+  th := rand.random(30.0,60.0);
+  off := 0;
+  o := list[vec[f32,2]]{};
+  oo := list[list[vec[f32,2]]]{};
+  ph := math.random();
+  for (i := 0; i < n; i++){
+    t := (i as f32) / (n - 1) 
+    t = t*0.6+0.2 + ph;
+    a := t * math.PI * 2;
+    r := rand.noise(i*0.1,x*7,y*math.PI)*0.7+0.3;
+    if (dist > 0.25){
+      r *= rand.noise(i*0.5,x*math.PI,y*44)*0.5+0.5;
+    }
+    x1 := x-(math.sin(a)+1)*math.cos(a)*dist*tw*r;
+    y1 := y-(math.sin(a)+1)*math.sin(a)*dist*th*r;
+    o.push({x1,y1});
+    if (off){
+      if (rand.random()<0.2){
+        off = 0;
+        oo.push(list[vec[f32,2]]{})
+      }
+    }
+    if (!off){
+      if (!oo.length()){
+        oo.push(list[vec[f32,2]]{})
+      }
+      oo[oo.length()-1].push({x1,y1})
+      if (oo[oo.length()-1].length()>10){
+        off = 1;
+      }
+    }
+  }
+  shapes.push(Shape{
+    type: OP_CLIP,
+    poly: o
+  });
+  for (i : = 0; i < oo.length(); i++){
+    shapes.push(Shape{
+      type: OP_POLY,
+      poly: oo[i]
+    });
+  }
+}
+
+
+func cloud(x:f32,y:f32){  
+
+  n := 200;
+  dist = (FAR-y)/FAR;
+
+  tw := rand.random(30.0,100.0) * (dist*0.5+0.5);
+  th := tw * rand.random(0.15,0.2)
+
+  off := 0;
+  o := list[vec[f32,2]]{};
+  oo := list[list[vec[f32,2]]]{};
+  ph := math.random();
+  for (i := 0; i < n; i++){
+    t := (i as f32) / (n - 1) 
+    t = t*0.8+0.1 + ph;
+    a := t * math.PI * 2;
+    r := rand.noise(t*10.0,x*7,y*math.PI)*0.7+0.3;
+    r *= rand.noise(t*50.0,x*math.PI,y*44)*0.1+0.9;
+    
+    x1 := x-(math.sin(a)+1)*math.cos(a)*tw*r;
+    y1 := y-(math.sin(a)+1)*math.sin(a)*th*r;
+    o.push({x1,y1});
+    if (off){
+      if (rand.random()<0.1){
+        off = 0;
+        oo.push(list[vec[f32,2]]{})
+      }
+    }
+    if (!off){
+      if (!oo.length()){
+        oo.push(list[vec[f32,2]]{})
+      }
+      oo[oo.length()-1].push({x1,y1})
+      if (oo[oo.length()-1].length()>15){
+        off = 1;
+      }
+    }
+  }
+  shapes.push(Shape{
+    type: OP_CLIP,
+    poly: o
+  });
+  for (i : = 0; i < oo.length(); i++){
+    shapes.push(Shape{
+      type: OP_POLY,
+      poly: oo[i]
+    });
+  }
+}
+
+func mountain(y:f32){
+  o := list[vec[f32,2]]{{0.0,y}};
+  for (x := 0.0; x < W; x+=1.0){
+    h := rand.noise(x*0.01,y*33.77)*50.0;
+    o.push({x,y-h})
+  }
+  o.push({W,y});
+  shapes.push(Shape{
+    type: OP_CLIP,
+    poly: o
+  });
+  shapes.push(Shape{
+    type: OP_POLY,
+    poly: o.slice(1,o.length()-1)
+  });
+}
+
+func bank(y:f32){
+  oo := list[list[vec[f32,2]]]{};
+  off := 0;
+  for (x := 0.0; x < W; x+=1.0){
+    h := rand.noise(x*0.01,y*33.77)*16.0-10.0;
+    if (off){
+      if (rand.random()<0.1){
+        off = 0;
+        oo.push(list[vec[f32,2]]{})
+      }
+    }
+    if (!off){
+      if (!oo.length()){
+        oo.push(list[vec[f32,2]]{})
+      }
+      oo[oo.length()-1].push({x,y-h})
+      if (oo[oo.length()-1].length()>rand.random[i32](20,40)){
+        off = 1;
+      }
+    }
+  }
+
+  
+  for (z := 0.0; z < 28.0; z+= 4.0){
+    off = 1;
+    for (x := 0.0; x < W; x+=1.0){
+      h := rand.noise(x*0.05,y*10.0)*6.0-3.0;
+      if (off){
+        if (rand.random()<0.2-z*0.01){
+          off = 0;
+          oo.push(list[vec[f32,2]]{})
+        }
+      }
+      if (!off){
+        if (!oo.length()){
+          oo.push(list[vec[f32,2]]{})
+        }
+        oo[oo.length()-1].push({x,y-h+z+5})
+        if (oo[oo.length()-1].length()>rand.random[i32](5,15)){
+          off = 1;
+        }
+      }
+    }
+  }
+
+  for (i : = 0; i < oo.length(); i++){
+    shapes.push(Shape{
+      type: OP_POLY,
+      poly: oo[i]
+    });
+  }
+}
+
+
+
+func bridge(x:f32,y:f32,d:f32){
+  dist = (y-FAR)/(NEAR-FAR);
+  w := 30.0;
+  h := 10.0;
+
+  tip := (y-h-FAR)*0.002*d;
+  y1 := y-tip;
+  dist1 := (y1-FAR)/(NEAR-FAR);
+  w1 := w * dist1/dist;
+
+  p0 := {x,y};
+  p1 := {x+w,y};
+  p2 := {x,y-h};
+  p3 := {x+w,y-h};
+  p4 := {x-d,y1};
+  p5 := {x-d,y1-h};
+  p6 := {x+w1-d,y1-h};
+  
+  shapes.push(Shape{
+    type: OP_CLIP,
+    poly: list[vec[f32,2]]{p5,p6,p3,p2}
+  });
+  shapes.push(Shape{
+    type: OP_POLY,
+    poly: list[vec[f32,2]]{p6,p3}
+  });
+  shapes.push(Shape{
+    type: OP_POLY,
+    poly: list[vec[f32,2]]{p2,p5}
+  });
+
+  n := 16;
+  k := dist1/dist;
+  for (i := 0; i < n; i++){
+    t0 := (i as f32)/(n - 1)-0.01;
+    t1 := (i as f32)/(n - 1)+0.01;
+
+    s0 := t0 / (k - (k-1)*t0);
+    s1 := t1 / (k - (k-1)*t1);
+
+    q0 := p2*(1-s0)+p5*s0;
+    q1 := p2*(1-s1)+p5*s1;
+
+    shapes.push(Shape{
+      type: OP_POLY,
+      poly: list[vec[f32,2]]{q0,q0+{0.0,5.0}}
+    });
+    shapes.push(Shape{
+      type: OP_POLY,
+      poly: list[vec[f32,2]]{q1,{q1.x,q0.y+5.0}}
+    });
+  }
+}
+
+
+func boat(x:f32,y:f32){
+  dist = (y-FAR)/(NEAR-FAR);
+  w := 20.0*dist;
+  h := 40.0*dist;
+  p0 := list[vec[f32,2]]{{x,y},{x,y-h},{x+w,y},{x+1,y}};
+  p1 := list[vec[f32,2]]{{x-w*0.1,y+h*0.2},{x+w*1.1,y+h*0.2}};
+  shapes.push(Shape{
+    type:OP_CLIP, poly:p0
+  })
+  shapes.push(Shape{
+    type:OP_POLY, poly:p0
+  })
+  shapes.push(Shape{
+    type:OP_POLY, poly:p1
+  })
+
+}
+
+dist := 0.0;
+for (y := FAR-1.0; y >= 0.0; y-=dist*60+1){
+  dist = (FAR-y)/FAR;
+  tx := rand.random(0,W);
+  cloud(tx+rand.random(-80.0,80.0),y);
+  
+}
+
+mountain(FAR+25.0);
+mountain(FAR+35.0);
+
+dist = 0.0;
+nobank := 1;
+nobridge := 1;
+noboat := 1;
+for (y := FAR+1; y < NEAR; y+=dist*2+1){
+  dist = (y-FAR)/(NEAR-FAR);
+  if ((0.37 <= dist) && nobank){
+    bank(y);
+    nobank = 0;
+  }
+  if ((0.75 <= dist) && nobridge){
+
+    bridge(rand.random(0,W/2-30),y,240.0);
+    bridge(rand.random(W/2+30,W),y,240.0);
+    
+    nobridge = 0;
+  }
+  if ((0.45 <= dist && dist <= 0.7)){
+    if (rand.random()<W/10000.0 || noboat){
+      boat(rand.random(0,W),y);
+      noboat = 0;
+    }
+  }
+  if ((0.1 <= dist && dist <= 0.37) || (0.81 <= dist)){
+    for (i := 0; i < W/160.0*(1.0-dist); i++){
+      building(rand.random(0,W),y);
+    }
+  }
+  if ((0.09 <= dist && dist <= 0.38) || (0.81 <= dist)){
+    for (i := 0; i < W/320.0; i++){
+      tx := rand.random(0,W);
+      for (k := 0; k < 3; k++){
+        tn := rand.random[i32](1,5);
+        for (j := 0; j < tn; j++){
+          tree(tx+rand.random(-80.0,80.0)*dist,y);
+        }
+      }
+    }
+  }
+}
+shapes.push(Shape{
+  type:OP_CLIP, poly:list[vec[f32,2]]{
+    {0.0,0.0},{-100.0,0.0},{-100.0,H+100},{W+100.0,H+100},{W+100,0},{W,0},{W,H},{0,H}
+  }
+})
+
+func export_svg(){
+  o := list[str]{"<svg xmlns=\"http://www.w3.org/2000/svg\" \nwidth=\"%{H*5}\" height=\"%{W*5}\">\n"};
+  for (i := 0; i < shapes.length(); i++){
+    if (i % 100 == 0){
+      io.println("%{i}/%{shapes.length()}");
+    }
+    if (shapes[i].type == OP_CLIP){
+      o.push("<path fill=\"white\" stroke=\"none\" d=\"\nM");
+    }else if (shapes[i].type == OP_POLY){
+      o.push("<path fill=\"none\" stroke=\"black\" d=\"\nM");
+    }else{
+      continue;
+    }
+    for (j := 0; j < shapes[i].poly.length(); j++){
+      ({x,y}) := shapes[i].poly[j];
+      o.push("%{y*5},%{(W-x)*5} "); 
+    }
+    if (shapes[i].type == OP_CLIP){
+      o.push("z");
+    }
+    o.push("\n\"/>");
+  }
+  o.push("</svg>");
+  io.write_file("/tmp/out.svg","".join(o).encode('utf-8'));
+}
+
+export_svg();
+
+drw.size(W,H);
+
+while (1){
+  drw.background(1.0);
+
+  for (i := 0; i < shapes.length(); i++){
+    if (shapes[i].type == OP_CLIP){
+      drw.fill(1.0);
+      drw.no_stroke();
+    }else if (shapes[i].type == OP_POLY){
+      drw.no_fill();
+      drw.stroke(0.0);
+    }else{
+      continue;
+    }
+    drw.begin_shape();
+    for (j := 0; j < shapes[i].poly.length(); j++){
+      drw.vertex(...shapes[i].poly[j])
+    }
+    drw.end_shape();
+  }
+
+  drw.poll();
+}
