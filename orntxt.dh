@@ -796,7 +796,7 @@ func opt_flower(ci:i32,si:i32){
     q2 := ray_polygon(q0,q1,cells[si]);
     l := (q2-q0).mag();
 
-    drw.line(...q0,...q2)
+    // drw.line(...q0,...q2)
     if (l > sz*1.0){
       vs.push(q2);
     }

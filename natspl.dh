@@ -1,0 +1,102 @@
+include "std/math"
+include "std/list"
+include "std/geom"
+include "std/drw"
+include "std/io"
+
+
+func natural_cubic_bezier(points:list[vec[f32,2]]):list[list[vec[f32,2]]]{
+  n := points.length() - 1;
+  if (n < 1) return list[list[vec[f32,2]]]{};
+  if (n == 1) {
+    p0 := points[0];
+    p3 := points[1];
+    c1 := p0 + (p3-p0)*(1.0/3.0);
+    c2 := p0 + (p3-p0)*(2.0/3.0);
+    return list[list[vec[f32,2]]]{list[vec[f32,2]]{p0, c1, c2, p3}};
+  }
+  func solve(rhs:list[f32]):list[f32]{
+    m := rhs.length();
+    x   := rhs.map(func(v:f32):f32{return 0.0});
+    tmp := rhs.map(func(v:f32):f32{return 0.0});
+    b := 2.0;
+    x[0] = rhs[0] / b;
+    for (i := 1; i < m; i++) {
+      tmp[i] = 1.0 / b;
+      b = ((i < m - 1) ? 4.0 : 3.5) - tmp[i];
+      x[i] = (rhs[i] - x[i-1]) / b;
+    }
+    for (i := 1; i < m; i++) {
+      x[m-1-i] -= tmp[m-i] * x[m-i];
+    }
+    return x;
+  }
+  func control_points_1d(K:list[f32]):list[f32]{
+    m := K.length() - 1;
+    rhs := list[f32]{};
+    rhs.push(K[0] + 2*K[1]);
+    for (i := 1; i < m - 1; i++) rhs.push(4.0*K[i] + 2.0*K[i+1]);
+    rhs.push((8.0*K[m-1] + K[m]) / 2.0);
+    return solve(rhs);
+  }
+  X := points.map(func(p:vec[f32,2]):f32{return p.x});
+  Y := points.map(func(p:vec[f32,2]):f32{return p.y});
+
+  p1x := control_points_1d(X);
+  p1y := control_points_1d(Y);
+
+  segments := list[list[vec[f32,2]]]{};
+  for (i := 0; i < n; i++) {
+    p0 := points[i];
+    p3 := points[i+1];
+    c1 := {p1x[i], p1y[i]};
+    c2 := {0.0,0.0};
+    if (i < n - 1) {
+      c2 = {2*X[i+1] - p1x[i+1], 2*Y[i+1] - p1y[i+1]};
+    } else {
+      c2 = {(X[n] + p1x[n-1]) / 2, (Y[n] + p1y[n-1]) / 2};
+    }
+    segments.push(list[vec[f32,2]]{p0, c1, c2, p3});
+  }
+  return segments;
+}
+
+inp := list[vec[f32,2]]{
+  {120, 380},
+  {260, 160},
+  {440, 420},
+  {620, 180},
+  {780, 360}
+}
+
+segs := natural_cubic_bezier(inp);
+// [[[120,380],[163.2142857142857,249.40476190476193],[206.4285714285714,118.80952380952382],[260,160]],[[260,160],[313.5714285714286,201.19047619047618],[377.50000000000006,414.1666666666667],[440,420]],[[440,420],[502.49999999999994,425.8333333333333],[563.5714285714287,224.52380952380952],[620,180]],[[620,180],[676.4285714285713,135.47619047619048],[728.2142857142857,247.73809523809524],[780,360]]]
+io.println(segs);
+curv := list[vec[f32,2]]{};
+
+
+for (i := 0; i < segs.length(); i++){
+  for (t := 0.0; t < 1.0; t += 0.01){
+    curv.push(geom.curve(segs[i],list[f32]{},t,geom.TYPE_BEZIER|geom.ORD_CUBIC));
+  }
+}
+
+
+drw.size(800,500);
+
+while (1){
+  drw.background(0.8);
+
+  for (i : = 0; i < inp.length(); i++){
+    drw.ellipse(...inp[i],10,10);
+  }
+
+  drw.no_fill();
+  drw.begin_shape();
+  for (i := 0; i < curv.length(); i++){
+    drw.vertex(...curv[i]);
+  }
+  drw.end_shape();
+
+  drw.poll();
+}
