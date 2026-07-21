@@ -220,10 +220,109 @@ func natural_cubic_bezier(points:list[vec[f32,2]]):list[list[vec[f32,2]]]{
 }
 
 
+func hobby(points:list[vec[f32,2]], omega:f32) : list[list[vec[f32,2]]]{
+
+  func thomas(A:list[f32],B:list[f32],C:list[f32],D:list[f32]):list[f32]{
+    n := B.length() - 1;
+    Cp := list[f32]{C[0]/B[0]};
+    Dp := list[f32]{D[0]/B[0]};
+    for (i := 1; i <= n; i++){
+      denom := B[i] - Cp[i-1] * A[i];
+      Cp.push(C[i] / denom);
+      Dp.push((D[i] - Dp[i-1]*A[i]) / denom);
+    }
+    X := list[f32]{Dp[n]};
+    for (i:=n-1; i>=0; i--){
+      X.insert(0, Dp[i]-Cp[i]*X[0]);
+    }
+    return X;
+  }
+  func v_angle_between(v:vec[f32,2],w:vec[f32,2]):f32{
+    return math.atan2(w.y * v.x - w.x * v.y, v.x * w.x + v.y * w.y);
+  }
+  func v_rot(v:vec[f32,2],angle:f32):vec[f32,2]{
+    ca := math.cos(angle);
+    sa := math.sin(angle);
+    return {v.x * ca - v.y * sa, v.x * sa + v.y * ca}
+  }
+  func rho(alpha:f32, beta:f32):f32{
+    c := 2./3.;
+    return 2. / (1 + c * math.cos(beta) + (1 - c) * math.cos(alpha));
+  }
+
+  n := points.length()-1;
+
+  if (n < 1) return list[list[vec[f32,2]]]{};
+  if (n == 1) {
+    p0 := points[0];
+    p3 := points[1];
+    c1 := p0 + (p3-p0)*(1.0/3.0);
+    c2 := p0 + (p3-p0)*(2.0/3.0);
+    return list[list[vec[f32,2]]]{list[vec[f32,2]]{p0, c1, c2, p3}};
+  }
+
+  chords := list[vec[f32,2]]{};
+  d := list[f32]{};
+  for (i := 0; i < n; i++){
+    chords.push(points[i+1]-points[i]);
+    d.push(chords[i].mag());
+  }
+  gamma := list[f32]{0};
+  for (i := 1; i < n; i++){
+    gamma.push(v_angle_between(chords[i-1], chords[i]));
+  }
+  gamma.push(0);
+
+  A := list[f32]{0};
+  B := list[f32]{2+omega};
+  C := list[f32]{2*omega+1};
+  D := list[f32]{-1*C[0]*gamma[1]};
+
+  for (i := 1; i < n; i++){
+    A.push(1./d[i-1]);
+    B.push((2.*d[i-1]+2.*d[i])/(d[i-1]*d[i]));
+    C.push(1./d[i]);
+    D.push((-1.*(2.*gamma[i]*d[i]+gamma[i+1]*d[i-1]))/(d[i-1]*d[i]));
+  }
+
+  A.push(2*omega+1);
+  B.push(2+omega);
+  C.push(0);
+  D.push(0);
+
+  alpha := thomas(A,B,C,D);
+  beta := list[f32]{};
+
+  for (i := 0; i < n - 1; i ++){
+    beta.push(-1 * gamma[i+1] - alpha[i+1]);
+  }
+  beta.push(-1*alpha[n]);
+
+  c0 := list[vec[f32,2]]{};
+  c1 := list[vec[f32,2]]{};
+
+  for (i := 0; i < n; i++){
+    a := rho(alpha[i],beta[i])*d[i] / 3.;
+    b := rho(beta[i],alpha[i])*d[i] / 3.;
+    c0.push( points[i]   + v_rot(chords[i],alpha[i]).dir() * a);
+    c1.push( points[i+1] - v_rot(chords[i],-beta[i]).dir() * b);
+  }
+
+  res := list[list[vec[f32,2]]]{};
+  for (i := 0; i < n; i++){
+    res.push(list[vec[f32,2]]{
+      points[i], c0[i], c1[i], points[i+1]
+    })
+  }
+  return res;
+}
+
+
 func smoothen(pts:list[vec[f32,2]]):list[vec[f32,2]]{
   out := list[vec[f32,2]]{};
   pms := list[f32]{};
-  nats := natural_cubic_bezier(pts);
+  // nats := natural_cubic_bezier(pts);
+  nats := hobby(pts,1.0);
   for (i := 0; i < nats.length(); i++){
     for (t:=0.0; t<1.0; t+=0.05){
       v := geom.curve[2](nats[i], pms, t, geom.TYPE_BEZIER | geom.ORD_CUBIC);
